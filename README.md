@@ -27,16 +27,16 @@ There are a list of known issues and TODOs at the end of this document.
 ## Installation
 
 ```bash
-git clone git@github.com:AI-Safety-Institute/aisi-inspect-analyse.git
-cd aisi-inspect-analyse
+git clone git@github.com:UKGovernmentBEIS/hibayes.git
+cd hibayes
 pip install -e .
 ```
 
 or with uv
 
 ```bash
-git clone git@github.com:AI-Safety-Institute/aisi-inspect-analyse.git
-cd aisi-inspect-analyse
+git clone git@github.com:UKGovernmentBEIS/hibayes.git
+cd hibayes
 uv venv .venv
 uv sync # if you want to exactly match dependencies
 uv pip install -e .
