@@ -1,0 +1,44 @@
+[build-system]
+requires = ["hatchling>=1.0.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "hibayes"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    # Other dependencies remain the same
+    "matplotlib>=3.10.1",
+    "pandas>=2.2.3",
+    "tqdm>=4.67.1",
+    "inspect-ai>=0.3.82",
+    "jax>=0.5.3",
+    "numpyro>=0.18.0",
+    "arviz>=0.21.0",
+    "rich>=13.3.3,<14.0.0",   # https://github.com/Textualize/rich/issues/3682
+    "textual>=0.86.2",
+    "plotext>=5.3.2",
+    "pyarrow>=20.0.0",
+    "fastparquet>=2024.11.0",
+    "dvc>=3.59.1",
+]
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/hibayes"]
+
+[tool.hatch.build]
+packages = ["src/hibayes"]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0.0", "pytest-cov>=4.0.0", "pytest-mock>=3.10.0"]
+
+[project.scripts]
+hibayes-load = "hibayes.cli.load:main"
+hibayes-model = "hibayes.cli.model:main"
+hibayes-comm = "hibayes.cli.communicate:main"
+hibayes-full = "hibayes.cli.full:main"

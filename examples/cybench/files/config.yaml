@@ -1,0 +1,23 @@
+model:
+  models:
+    ModelBetaBinomial:
+      mapping_name:
+        Success Count: n_correct
+        Total Attempts: n_total
+    ModelBinomial:
+      mapping_name:
+        Success Count: n_correct
+        Total Attempts: n_total
+platform:
+checkers:
+  checks:
+    - prior_predictive_plot
+    - r_hat
+    - divergences
+    - ess_bulk
+    - ess_tail
+    - loo
+    - bfmi
+    - posterior_predictive_plot: {plot_proportion: true}
+    - waic
+communicate:

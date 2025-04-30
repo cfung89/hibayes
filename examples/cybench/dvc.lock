@@ -1,0 +1,82 @@
+schema: '2.0'
+stages:
+  load:
+    cmd: python get_csvs.py --csv files/data.csv --out .output/load/
+    deps:
+    - path: get_csvs.py
+      hash: md5
+      md5: a7e98e1b4fa6ebce7a9657bfcd222f2c
+      size: 618
+    outs:
+    - path: .output/load/
+      hash: md5
+      md5: a4a1f60793d30a1272f46c6bc8195828.dir
+      size: 2368
+      nfiles: 1
+  model:
+    cmd: hibayes-model --config files/config.yaml --data .output/load/data.csv --out
+      .output/model/
+    deps:
+    - path: ../../src/hibayes/
+      hash: md5
+      md5: 33a0d116c39f00631368eff9b2616609.dir
+      size: 390383
+      nfiles: 83
+    - path: .output/load/data.csv
+      hash: md5
+      md5: 3eedd8e665e58e92bb14f82ec6439692
+      size: 2368
+    params:
+      files/config.yaml:
+        checkers:
+          checks:
+          - prior_predictive_plot
+          - r_hat
+          - divergences
+          - ess_bulk
+          - ess_tail
+          - loo
+          - bfmi
+          - posterior_predictive_plot:
+              plot_proportion: true
+          - waic
+        model:
+          models:
+            ModelBetaBinomial:
+              mapping_name:
+                Success Count: n_correct
+                Total Attempts: n_total
+            ModelBinomial:
+              mapping_name:
+                Success Count: n_correct
+                Total Attempts: n_total
+        platform:
+    outs:
+    - path: .output/model/
+      hash: md5
+      md5: b31f48ed4f997b1871c096e3f6e72c1b.dir
+      size: 18294176
+      nfiles: 23
+  communicate:
+    cmd: hibayes-comm --config files/config.yaml --analysis_state .output/model/ --out
+      .output/communicate/
+    deps:
+    - path: ../../src/hibayes/
+      hash: md5
+      md5: 33a0d116c39f00631368eff9b2616609.dir
+      size: 390383
+      nfiles: 83
+    - path: .output/model/
+      hash: md5
+      md5: b31f48ed4f997b1871c096e3f6e72c1b.dir
+      size: 18294176
+      nfiles: 23
+    params:
+      files/config.yaml:
+        communicate:
+    outs:
+    - path: .output/communicate/
+      hash: md5
+      md5: 6a7fb15dd1e9ad152dca372f663aefed.dir
+      size: 19293634
+      nfiles: 19
