@@ -536,6 +536,15 @@ class ModelSampleEffects(BaseModel):
 
 class ModelBetaBinomial(BaseModel):
     def _prepare_data(self, data: pd.DataFrame):
+
+        # Aggregate if has not been done already
+        if 'n_success' not in data.columns:
+            data = data.groupby(['model', 'task']).agg({'score':['count', 'sum']}).reset_index() # get nb total scores and nb correct scores
+            data.columns = ['_'.join(col).strip('_') if col[1] != '' else col[0] for col in data.columns.values] # flatten multiindex
+            data.rename(columns={'score_count': 'n_total', 
+                                 'score_sum': 'n_correct',
+                                 'task': 'task_id'}, inplace=True)
+            
         # map categorical levels to integer codes
         model_index = data["model"].astype("category").cat.codes
         task_index = data["task_id"].astype("category").cat.codes
@@ -671,6 +680,15 @@ class ModelBetaBinomial(BaseModel):
 
 class ModelBinomial(BaseModel):
     def _prepare_data(self, data: pd.DataFrame):
+
+        # Aggregate if has not been done already
+        if 'n_success' not in data.columns:
+            data = data.groupby(['model', 'task']).agg({'score':['count', 'sum']}).reset_index() # get nb total scores and nb correct scores
+            data.columns = ['_'.join(col).strip('_') if col[1] != '' else col[0] for col in data.columns.values] # flatten multiindex
+            data.rename(columns={'score_count': 'n_total', 
+                                 'score_sum': 'n_correct',
+                                 'task': 'task_id'}, inplace=True)
+
         # map categorical levels to integer codes
         model_index = data["model"].astype("category").cat.codes
         task_index = data["task_id"].astype("category").cat.codes
