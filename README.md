@@ -14,9 +14,9 @@ There are a list of known issues and TODOs at the end of this document.
   - [Table of Contents](#table-of-contents)
   - [Installation](#installation)
   - [DVC](#dvc)
-  - [quick start examples](#quick-start-examples)
+  - [Quick start examples](#quick-start-examples)
   - [Features](#features)
-  - [Example command line usage](#example-command-line-usage)
+  - [Command line usage](#example-command-line-usage)
     - [loading](#loading)
     - [modelling](#modelling)
     - [communicating](#communicating)
@@ -89,6 +89,8 @@ dvc repro
 
 
 ## quick start examples.
+
+_note: will be adding examples over the next few week. Current blocker is being able to share inspect eval logs run with AISI api keys. Noting that the gaia example is currently not working as requires access to private AISI s3.
 
 ```bash
 cd examples/cybench/

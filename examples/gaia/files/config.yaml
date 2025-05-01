@@ -1,3 +1,4 @@
+# noting that this example is only accessible to internal AISI users - will soon be able to share internal inspect logs for examples.
 data_loader:
   paths:
     files_to_process:
