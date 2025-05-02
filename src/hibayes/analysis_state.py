@@ -356,8 +356,11 @@ class AnalysisState:
         """
         _ensure_dir(path)
 
-        self.data.to_parquet(path / "data.parquet")
-
+        self.data.to_parquet(
+            path / "data.parquet",
+            engine="pyarrow",  # auto might result in different engines in different setups)
+            compression="snappy",
+        )
         if self._communicate:
             comm_path = path / "communicate"
             _ensure_dir(comm_path)
@@ -367,7 +370,11 @@ class AnalysisState:
                     obj.savefig(comm_path / f"{name}.png", dpi=300, bbox_inches="tight")
                     plt.close(obj)  # free memory in long pipelines
                 elif isinstance(obj, pd.DataFrame):
-                    obj.to_parquet(comm_path / f"{name}.parquet")
+                    obj.to_parquet(
+                        comm_path / f"{name}.parquet",
+                        engine="pyarrow",  # auto might result in different engines in different setups)
+                        compression="snappy",
+                    )
                 else:
                     raise TypeError(
                         f"Unsupported communicate object type for '{name}': {type(obj)}"

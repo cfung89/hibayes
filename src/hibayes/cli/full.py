@@ -19,7 +19,9 @@ def run_full(args):
         config=config.data_loader,
     )
     df.to_parquet(
-        args.out + "/data.parquet",
+        out / "data.parquet",
+        engine="pyarrow",  # auto might result in different engines in different setups)
+        compression="snappy",
     )
 
     analysis_state = model(
