@@ -32,8 +32,9 @@ from .extractors import (
     TokenExtractor,
     ToolsExtractor,
 )
-from .utils.patch_inspect_loader import (
+from .utils import (
     LogSample,
+    check_mixed_types,
     update_inspect_recorders,
 )
 
@@ -444,6 +445,9 @@ def get_sample_df(
         finally:
             # We don't stop the display as it was passed in
             logger.info("Finished processing logs.")
+
+        # Check for mixed types in the DataFrame that will error parquet write
+        check_mixed_types(df)
 
         if display:
             if display.live:
