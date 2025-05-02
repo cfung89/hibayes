@@ -27,15 +27,16 @@ import numpyro
 import numpyro.distributions as dist
 import pandas as pd
 import yaml
+from matplotlib import pyplot as plt
+from matplotlib.figure import Figure
+from numpyro.distributions.distribution import DistributionLike
+from numpyro.infer import HMC, MCMC, NUTS, Predictive
+
 from hibayes.ui import (
     ModellingDisplay,
     patch_fori_collect_with_rich_display,
 )
 from hibayes.utils import init_logger
-from matplotlib import pyplot as plt
-from matplotlib.figure import Figure
-from numpyro.distributions.distribution import DistributionLike
-from numpyro.infer import HMC, MCMC, NUTS, Predictive
 
 from .utils import logit_to_prob
 
@@ -536,27 +537,26 @@ class ModelSampleEffects(BaseModel):
 
 class ModelBetaBinomial(BaseModel):
     def _prepare_data(self, data: pd.DataFrame):
-
         # Aggregate if has not been done already
-        if 'n_success' not in data.columns:
-            data = data.groupby(['model', 'task']).agg({'score':['count', 'sum']}).reset_index() # get nb total scores and nb correct scores
-            data.columns = ['_'.join(col).strip('_') if col[1] != '' else col[0] for col in data.columns.values] # flatten multiindex
-            data.rename(columns={'score_count': 'n_total', 
-                                 'score_sum': 'n_correct',
-                                 'task': 'task_id'}, inplace=True)
-            
+        if "n_correct" not in data.columns:
+            data = (
+                data.groupby(["model", "task"])
+                .agg(n_correct=("score", "sum"), n_total=("score", "count"))
+                .reset_index()
+            )  # get nb total scores and nb correct scores
+
         # map categorical levels to integer codes
         model_index = data["model"].astype("category").cat.codes
-        task_index = data["task_id"].astype("category").cat.codes
+        task_index = data["task"].astype("category").cat.codes
 
         model_names = data["model"].astype("category").cat.categories
-        task_names = data["task_id"].astype("category").cat.categories
+        task_names = data["task"].astype("category").cat.categories
 
         features = {
             "model_index": jnp.array(model_index),
             "task_index": jnp.array(task_index),
             "num_models": int(data["model"].nunique()),
-            "num_tasks": int(data["task_id"].nunique()),
+            "num_tasks": int(data["task"].nunique()),
             "total_count": jnp.array(data["n_total"].values),
             "obs": jnp.array(
                 data["n_correct"].values / data["n_total"].values
@@ -631,9 +631,7 @@ class ModelBetaBinomial(BaseModel):
             # Calculate log-odds
             logits = numpyro.deterministic(
                 "logits",
-                overall_mean
-                + task_effects[task_index]
-                + model_effects[model_index],
+                overall_mean + task_effects[task_index] + model_effects[model_index],
             )
 
             # Convert to average probability
@@ -680,27 +678,26 @@ class ModelBetaBinomial(BaseModel):
 
 class ModelBinomial(BaseModel):
     def _prepare_data(self, data: pd.DataFrame):
-
         # Aggregate if has not been done already
-        if 'n_success' not in data.columns:
-            data = data.groupby(['model', 'task']).agg({'score':['count', 'sum']}).reset_index() # get nb total scores and nb correct scores
-            data.columns = ['_'.join(col).strip('_') if col[1] != '' else col[0] for col in data.columns.values] # flatten multiindex
-            data.rename(columns={'score_count': 'n_total', 
-                                 'score_sum': 'n_correct',
-                                 'task': 'task_id'}, inplace=True)
+        if "n_correct" not in data.columns:
+            data = (
+                data.groupby(["model", "task"])
+                .agg(n_correct=("score", "sum"), n_total=("score", "count"))
+                .reset_index()
+            )  #
 
         # map categorical levels to integer codes
         model_index = data["model"].astype("category").cat.codes
-        task_index = data["task_id"].astype("category").cat.codes
+        task_index = data["task"].astype("category").cat.codes
 
         model_names = data["model"].astype("category").cat.categories
-        task_names = data["task_id"].astype("category").cat.categories
+        task_names = data["task"].astype("category").cat.categories
 
         features = {
             "model_index": jnp.array(model_index),
             "task_index": jnp.array(task_index),
             "num_models": int(data["model"].nunique()),
-            "num_tasks": int(data["task_id"].nunique()),
+            "num_tasks": int(data["task"].nunique()),
             "total_count": jnp.array(data["n_total"].values),
             "obs": jnp.array(
                 data["n_correct"].values / data["n_total"].values
@@ -775,9 +772,7 @@ class ModelBinomial(BaseModel):
             # Calculate log-odds
             logits = numpyro.deterministic(
                 "logits",
-                overall_mean
-                + task_effects[task_index]
-                + model_effects[model_index],
+                overall_mean + task_effects[task_index] + model_effects[model_index],
             )
 
             # Sample success probabilities from a Beta
