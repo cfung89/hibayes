@@ -31,10 +31,10 @@ class BaseMetadataExtractor(MetadataExtractor):
 
         return {
             "score": self._normalise_score(next(iter(sample.scores.values())).value),
-            "target": sample.target,
+            "target": str(sample.target),
             "model": model_name,
             "dataset": eval_log.eval.dataset.name,
-            "task": sample.id,
+            "task": str(sample.id),
             "epoch": sample.epoch,
             "num_messages": len(sample.messages),
         }
@@ -56,19 +56,19 @@ class CyberMetadataExtractor(MetadataExtractor):
             return {}
 
         attributes = {
-            "max_messages": metadata.get("max_messages"),
-            "category": metadata.get("category"),
-            "split": metadata.get("split"),
-            "full_name": metadata.get("full_name", sample.id),
-            "description": metadata.get("description"),
-            "source": metadata.get("source"),
+            "max_messages": int(metadata.get("max_messages")),
+            "category": str(metadata.get("category")),
+            "split": str(metadata.get("split")),
+            "full_name": str(metadata.get("full_name", sample.id)),
+            "description": str(metadata.get("description")),
+            "source": str(metadata.get("source")),
         }
 
         domains = {}
         capabilities = metadata.get("capabilities", [])
         if capabilities:
             domains = {
-                domain["name"]: domain["level"]
+                domain["name"]: str(domain["level"])
                 for domain in capabilities
                 if "name" in domain and "level" in domain
             }
@@ -86,7 +86,11 @@ class ToolsExtractor(MetadataExtractor):
                 tool_params = step.params.get("tools", [])
                 if tool_params:
                     tools.extend(
-                        [tool.get("name") for tool in tool_params if "name" in tool]
+                        [
+                            str(tool.get("name"))
+                            for tool in tool_params
+                            if "name" in tool
+                        ]
                     )
         return {"tools": tools or [None]}
 
