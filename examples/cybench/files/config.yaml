@@ -4,12 +4,12 @@ model:
       mapping_name:
         Success Count: n_correct
         Total Attempts: n_total
-        Sample ID: task_id
+        Sample ID: task
     ModelBinomial:
       mapping_name:
         Success Count: n_correct
         Total Attempts: n_total
-        Sample ID: task_id
+        Sample ID: task
 platform:
 checkers:
   checks:
