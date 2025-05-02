@@ -27,15 +27,16 @@ import numpyro
 import numpyro.distributions as dist
 import pandas as pd
 import yaml
+from matplotlib import pyplot as plt
+from matplotlib.figure import Figure
+from numpyro.distributions.distribution import DistributionLike
+from numpyro.infer import HMC, MCMC, NUTS, Predictive
+
 from hibayes.ui import (
     ModellingDisplay,
     patch_fori_collect_with_rich_display,
 )
 from hibayes.utils import init_logger
-from matplotlib import pyplot as plt
-from matplotlib.figure import Figure
-from numpyro.distributions.distribution import DistributionLike
-from numpyro.infer import HMC, MCMC, NUTS, Predictive
 
 from .utils import logit_to_prob
 
@@ -536,18 +537,26 @@ class ModelSampleEffects(BaseModel):
 
 class ModelBetaBinomial(BaseModel):
     def _prepare_data(self, data: pd.DataFrame):
+        # Aggregate if has not been done already
+        if "n_correct" not in data.columns:
+            data = (
+                data.groupby(["model", "task"])
+                .agg(n_correct=("score", "sum"), n_total=("score", "count"))
+                .reset_index()
+            )  # get nb total scores and nb correct scores
+
         # map categorical levels to integer codes
         model_index = data["model"].astype("category").cat.codes
-        sample_index = data["Sample ID"].astype("category").cat.codes
+        task_index = data["task"].astype("category").cat.codes
 
         model_names = data["model"].astype("category").cat.categories
-        sample_names = data["Sample ID"].astype("category").cat.categories
+        task_names = data["task"].astype("category").cat.categories
 
         features = {
             "model_index": jnp.array(model_index),
-            "sample_index": jnp.array(sample_index),
+            "task_index": jnp.array(task_index),
             "num_models": int(data["model"].nunique()),
-            "num_samples": int(data["Sample ID"].nunique()),
+            "num_tasks": int(data["task"].nunique()),
             "total_count": jnp.array(data["n_total"].values),
             "obs": jnp.array(
                 data["n_correct"].values / data["n_total"].values
@@ -557,11 +566,11 @@ class ModelBetaBinomial(BaseModel):
         coords = {
             "coords": {
                 "model": model_names,
-                "sample": sample_names,
+                "task": task_names,
             },
             "dims": {
                 "model_effects": ["model"],
-                "sample_effects": ["sample"],
+                "task_effects": ["task"],
             },
         }
         return features, coords
@@ -593,10 +602,10 @@ class ModelBetaBinomial(BaseModel):
     def build_model(self) -> Callable[..., Any]:
         def model(
             num_models: int,
-            num_samples: int,
+            num_tasks: int,
             total_count: jnp.ndarray,
             model_index: jnp.ndarray,
-            sample_index: jnp.ndarray,
+            task_index: jnp.ndarray,
             obs=None,  # proportion of successes
         ):
             # ------------------ Global intercept -----------------------
@@ -605,11 +614,11 @@ class ModelBetaBinomial(BaseModel):
                 **self.config.parameter_to_numpyro("overall_mean")
             )
 
-            # ------------------ Sample‑level random effects ------------
+            # ------------------ Task‑level random effects ------------
 
-            # Separate parameter for each model
-            with numpyro.plate("sample_plate", num_samples):
-                sample_effects = numpyro.sample("sample_effects", dist.Normal(0, 0.3))
+            # Separate parameter for each task
+            with numpyro.plate("task_plate", num_tasks):
+                task_effects = numpyro.sample("task_effects", dist.Normal(0, 0.3))
 
             # ------------------ Model‑level random effects -------------
 
@@ -622,9 +631,7 @@ class ModelBetaBinomial(BaseModel):
             # Calculate log-odds
             logits = numpyro.deterministic(
                 "logits",
-                overall_mean
-                + sample_effects[sample_index]
-                + model_effects[model_index],
+                overall_mean + task_effects[task_index] + model_effects[model_index],
             )
 
             # Convert to average probability
@@ -671,18 +678,26 @@ class ModelBetaBinomial(BaseModel):
 
 class ModelBinomial(BaseModel):
     def _prepare_data(self, data: pd.DataFrame):
+        # Aggregate if has not been done already
+        if "n_correct" not in data.columns:
+            data = (
+                data.groupby(["model", "task"])
+                .agg(n_correct=("score", "sum"), n_total=("score", "count"))
+                .reset_index()
+            )  #
+
         # map categorical levels to integer codes
         model_index = data["model"].astype("category").cat.codes
-        sample_index = data["Sample ID"].astype("category").cat.codes
+        task_index = data["task"].astype("category").cat.codes
 
         model_names = data["model"].astype("category").cat.categories
-        sample_names = data["Sample ID"].astype("category").cat.categories
+        task_names = data["task"].astype("category").cat.categories
 
         features = {
             "model_index": jnp.array(model_index),
-            "sample_index": jnp.array(sample_index),
+            "task_index": jnp.array(task_index),
             "num_models": int(data["model"].nunique()),
-            "num_samples": int(data["Sample ID"].nunique()),
+            "num_tasks": int(data["task"].nunique()),
             "total_count": jnp.array(data["n_total"].values),
             "obs": jnp.array(
                 data["n_correct"].values / data["n_total"].values
@@ -692,11 +707,11 @@ class ModelBinomial(BaseModel):
         coords = {
             "coords": {
                 "model": model_names,
-                "sample": sample_names,
+                "task": task_names,
             },
             "dims": {
                 "model_effects": ["model"],
-                "sample_effects": ["sample"],
+                "task_effects": ["task"],
             },
         }
         return features, coords
@@ -728,10 +743,10 @@ class ModelBinomial(BaseModel):
     def build_model(self) -> Callable[..., Any]:
         def model(
             num_models: int,
-            num_samples: int,
+            num_tasks: int,
             total_count: jnp.ndarray,
             model_index: jnp.ndarray,
-            sample_index: jnp.ndarray,
+            task_index: jnp.ndarray,
             obs=None,  # proportion of successes
         ):
             # ------------------ Global intercept -----------------------
@@ -740,11 +755,11 @@ class ModelBinomial(BaseModel):
                 **self.config.parameter_to_numpyro("overall_mean")
             )
 
-            # ------------------ Sample‑level random effects ------------
+            # ------------------ Task‑level random effects ------------
 
-            # Separate parameter for each model
-            with numpyro.plate("sample_plate", num_samples):
-                sample_effects = numpyro.sample("sample_effects", dist.Normal(0, 0.3))
+            # Separate parameter for each task
+            with numpyro.plate("task_plate", num_tasks):
+                task_effects = numpyro.sample("task_effects", dist.Normal(0, 0.3))
 
             # ------------------ Model‑level random effects -------------
 
@@ -757,9 +772,7 @@ class ModelBinomial(BaseModel):
             # Calculate log-odds
             logits = numpyro.deterministic(
                 "logits",
-                overall_mean
-                + sample_effects[sample_index]
-                + model_effects[model_index],
+                overall_mean + task_effects[task_index] + model_effects[model_index],
             )
 
             # Sample success probabilities from a Beta

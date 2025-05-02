@@ -19,9 +19,9 @@ stages:
     deps:
     - path: ../../src/hibayes/
       hash: md5
-      md5: 33a0d116c39f00631368eff9b2616609.dir
-      size: 390383
-      nfiles: 83
+      md5: b00737fccccd80f7c7084ff41b3811a7.dir
+      size: 392380
+      nfiles: 84
     - path: .output/load/data.csv
       hash: md5
       md5: 3eedd8e665e58e92bb14f82ec6439692
@@ -46,16 +46,18 @@ stages:
               mapping_name:
                 Success Count: n_correct
                 Total Attempts: n_total
+                Sample ID: task
             ModelBinomial:
               mapping_name:
                 Success Count: n_correct
                 Total Attempts: n_total
+                Sample ID: task
         platform:
     outs:
     - path: .output/model/
       hash: md5
-      md5: b31f48ed4f997b1871c096e3f6e72c1b.dir
-      size: 18294176
+      md5: 7f2ccc7d0b30f3ab1875553f8b925ca2.dir
+      size: 18294838
       nfiles: 23
   communicate:
     cmd: hibayes-comm --config files/config.yaml --analysis_state .output/model/ --out
@@ -63,13 +65,13 @@ stages:
     deps:
     - path: ../../src/hibayes/
       hash: md5
-      md5: 33a0d116c39f00631368eff9b2616609.dir
-      size: 390383
-      nfiles: 83
+      md5: b00737fccccd80f7c7084ff41b3811a7.dir
+      size: 392380
+      nfiles: 84
     - path: .output/model/
       hash: md5
-      md5: b31f48ed4f997b1871c096e3f6e72c1b.dir
-      size: 18294176
+      md5: 7f2ccc7d0b30f3ab1875553f8b925ca2.dir
+      size: 18294838
       nfiles: 23
     params:
       files/config.yaml:
@@ -77,6 +79,6 @@ stages:
     outs:
     - path: .output/communicate/
       hash: md5
-      md5: 6a7fb15dd1e9ad152dca372f663aefed.dir
-      size: 19293634
+      md5: 729822a64dcdcf57b5810cf060701f54.dir
+      size: 19310684
       nfiles: 19

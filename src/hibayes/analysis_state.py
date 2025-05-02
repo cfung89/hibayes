@@ -324,8 +324,18 @@ class AnalysisState:
                 return model
         raise ValueError(f"Model {model_name} not found in analysis state.")
 
-    def get_best_model(self, with_respect_to: str = "waic") -> ModelAnalysisState:
-        """Get the best model based on a diagnostic metric (lower is better)."""
+    def get_best_model(
+        self, with_respect_to: str = "elpd_waic", minimum: bool = True
+    ) -> ModelAnalysisState:
+        """
+        Get the best model based on a diagnostic metric (lower is better).
+
+        Args:
+            with_respect_to (str): The diagnostic metric to use for comparison. This needs
+            to be an attribute calculated by the checkers and added to diagnoistics.
+            minimum (bool): If True, the model with the minimum value of the diagnostic is returned.
+
+        """
         # Collect models that have the specified diagnostic
         candidates: List[Tuple[float, ModelAnalysisState]] = []
         for model in self.models:
@@ -336,8 +346,12 @@ class AnalysisState:
         if not candidates:
             raise ValueError(f"No models have diagnostic '{with_respect_to}'.")
 
-        # Select the model with the lowest metric value
-        best_value, best_model = min(candidates, key=lambda x: x[0])
+        # Select the model with best metric
+        best_value, best_model = (
+            min(candidates, key=lambda x: x[0])
+            if minimum
+            else max(candidates, key=lambda x: x[0])
+        )
         return best_model
 
     def save(self, path: Path) -> None:
