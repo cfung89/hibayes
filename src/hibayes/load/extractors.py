@@ -26,8 +26,8 @@ class BaseMetadataExtractor(MetadataExtractor):
     """Default extractor providing basic metadata from all samples"""
 
     def extract(self, sample: EvalSample, eval_log: EvalLog) -> Dict[str, Any]:
-        model_name = eval_log.eval.model
-        model_name = model_name.split("/")[-1] if "/" in model_name else model_name
+        model_name_raw = eval_log.eval.model
+        model_name = model_name_raw.split("/")[-1] if "/" in model_name_raw else model_name_raw
 
         # record the log file path this sample came from
         log_path = eval_log.location
@@ -36,6 +36,7 @@ class BaseMetadataExtractor(MetadataExtractor):
             "score": self._normalise_score(next(iter(sample.scores.values())).value),
             "target": str(sample.target),
             "model": model_name,
+            "model_raw": model_name_raw,
             "dataset": eval_log.eval.dataset.name,
             "task": str(sample.id),
             "epoch": sample.epoch,
