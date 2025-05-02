@@ -11,7 +11,9 @@ def run_load(args):
     df = load_data(config=config.data_loader, display=display)
     pathlib.Path(args.out).mkdir(parents=True, exist_ok=True)
     df.to_parquet(
-        args.out + "/data.parquet",
+        args.out / "data.parquet",
+        engine="pyarrow",  # auto might result in different engines in different setups)
+        compression="snappy",
     )
 
 
