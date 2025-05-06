@@ -344,7 +344,11 @@ class BaseModel(ABC):
         Prepare data for modeling. Wraps the abstract method _prepare_data so
         to enforce that observed variable in features.
         """
-        data_copy = data.rename(columns=self.config.mapping_name)
+        data_copy = (
+            data.rename(columns=self.config.mapping_name)
+            if self.config.mapping_name
+            else data.copy()
+        )
         features, coords = self._prepare_data(data_copy)
 
         if "obs" not in features:
