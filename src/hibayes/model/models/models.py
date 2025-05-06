@@ -592,7 +592,7 @@ class ModelBetaBinomial(BaseModel):
 
         config.main_effect_params = [
             "overall_mean",
-            "success_prob",
+            "model_effects",
         ]
 
         config.mapping_name = {}
@@ -738,7 +738,7 @@ class ModelBinomial(BaseModel):
 
         config.main_effect_params = [
             "overall_mean",
-            "success_prob",
+            "model_effects",
         ]
 
         config.mapping_name = {}
