@@ -26,6 +26,7 @@ from .models import (
     ModelBinomial,
     ModelConfig,
     ModelSampleEffects,
+    ModelBetaBinomialwSetup,
 )
 
 logger = init_logger()
@@ -44,6 +45,7 @@ class ModelsToRunConfig:
         "CompareVarEffects": None,
         "ModelSampleEffects": ModelSampleEffects,
         "ModelBetaBinomial": ModelBetaBinomial,
+        "ModelBetaBinomialwSetup": ModelBetaBinomialwSetup,
         "ModelBinomial": ModelBinomial,
     }
 
