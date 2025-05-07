@@ -93,11 +93,11 @@ class LogProcessor:
         row = {}
         errors = []
 
-        sample = read_eval_log_sample(log_info, sample.id, sample.epoch)
+        loaded_sample = read_eval_log_sample(log_info, sample.id, sample.epoch)
 
         for extractor in self.extractors:
             try:
-                extracted_data = extractor.extract(sample, eval_log_header)
+                extracted_data = extractor.extract(loaded_sample, eval_log_header)
                 row.update(extracted_data)
             except Exception as e:
                 extractor_name = extractor.__class__.__name__
@@ -237,10 +237,8 @@ def process_eval_logs_parallel(
                 sample, eval_log_header, log_info, display
             )
             return {
-                "model": eval_log_header.eval.model,
-                "sample_id": sample.id,
-                "sample_epoch": sample.epoch,
-                "result": result,
+                "sample_error": False,
+                **result,
             }
         except Exception as e:
             error_msg = f"Error in {sample.id}: {str(e)}"
@@ -249,7 +247,8 @@ def process_eval_logs_parallel(
                 "model": eval_log_header.eval.model,
                 "sample_id": sample.id,
                 "sample_epoch": sample.epoch,
-                "error": error_msg,
+                "sample_error_message": error_msg,
+                "sample_error": True,
             }
 
     # Process all tasks in parallel
@@ -267,16 +266,16 @@ def process_eval_logs_parallel(
 
         for result in task_iterator:
             # Either add results or track the error
-            if "result" in result:
+            if not result["sample_error"]:
                 samples_processed += 1
                 if display:
                     display.update_stat("Samples processed", samples_processed)
-                yield result["result"]
+                yield result
             else:
                 errors += 1
                 if display:
                     display.update_stat("Sample errors", errors)
-                yield result["error"]
+                yield result
             if display:
                 display.update_task("Processing samples", advance=1)
 
@@ -355,7 +354,7 @@ def get_sample_df(
     if display:
         if not display.live:
             display.start()
-        display.update_header("HiBayES - Processing Logs")
+        display.update_header("Processing Logs")
         capture_context = display.capture_logs()
     else:
         capture_context = nullcontext()
