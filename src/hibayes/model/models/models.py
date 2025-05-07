@@ -599,8 +599,6 @@ class ModelBetaBinomial(BaseModel):
             "success_prob",
         ]
 
-        config.mapping_name = {}
-
         return config
 
     def build_model(self) -> Callable[..., Any]:
@@ -739,8 +737,6 @@ class ModelBinomial(BaseModel):
             "overall_mean",
             "success_prob",
         ]
-
-        config.mapping_name = {}
 
         return config
 
