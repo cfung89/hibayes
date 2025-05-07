@@ -1,6 +1,5 @@
-from typing import Literal, Tuple
+from typing import Tuple
 
-import arviz as az
 import numpy as np
 
 from hibayes.analyse import Checker, CheckerResult, checker

@@ -1,11 +1,11 @@
-from typing import Callable, Tuple
+from typing import Tuple
 
 import arviz as az
 import matplotlib.pyplot as plt
 
 from ...analysis_state import AnalysisState
 from ...ui import ModellingDisplay
-from .._communicate import CommunicateResult, Communicator, communicate
+from .._communicate import CommunicateResult, communicate
 
 
 @communicate
@@ -37,7 +37,7 @@ def forest_plot(
             if model_analysis.is_fitted:
                 if vars is None:
                     vars = model_analysis.model_builder.config.main_effect_params
-                ax = az.plot_forest(
+                az.plot_forest(
                     model_analysis.inference_data,
                     var_names=vars,
                     figsize=figsize,
@@ -84,7 +84,7 @@ def trace_plot(
                 # best to get all the parameter from the model for the trace plot
                 vars = list(model_analysis.inference_data.posterior.data_vars)
             if model_analysis.is_fitted:
-                ax = az.plot_trace(
+                az.plot_trace(
                     model_analysis.inference_data,
                     var_names=vars,
                     figsize=figsize,
@@ -130,7 +130,7 @@ def pair_plot(
             if model_analysis.is_fitted:
                 if vars is None:
                     vars = model_analysis.model_builder.config.main_effect_params
-                ax = az.plot_pair(
+                az.plot_pair(
                     model_analysis.inference_data,
                     var_names=vars,
                     kind="kde",
@@ -186,7 +186,7 @@ def model_comparison_plot(
             **kwargs,
         )
 
-        ax = az.plot_compare(comparisons, figsize=figsize, *args, **kwargs)
+        az.plot_compare(comparisons, figsize=figsize, *args, **kwargs)
         fig = plt.gcf()
         state.add_plot(
             plot=fig,

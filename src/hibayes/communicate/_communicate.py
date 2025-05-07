@@ -2,11 +2,8 @@ from functools import wraps
 from typing import (
     Callable,
     Literal,
-    Optional,
     Protocol,
     Tuple,
-    TypeVar,
-    runtime_checkable,
 )
 
 from ..analysis_state import AnalysisState

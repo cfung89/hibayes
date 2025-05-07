@@ -1,12 +1,10 @@
-import sys
-from typing import Callable, List, Optional, Tuple
+from typing import List, Optional, Tuple
 
 import arviz as az
 import jax
 import matplotlib.pyplot as plt
 import numpy as np
 import xarray as xr
-from matplotlib.figure import Figure
 from numpyro.infer import Predictive
 
 from ..analysis_state import ModelAnalysisState

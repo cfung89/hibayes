@@ -1,4 +1,3 @@
-import logging
 from abc import ABC, abstractmethod
 from typing import Any, Dict
 
@@ -27,7 +26,9 @@ class BaseMetadataExtractor(MetadataExtractor):
 
     def extract(self, sample: EvalSample, eval_log: EvalLog) -> Dict[str, Any]:
         model_name_raw = eval_log.eval.model
-        model_name = model_name_raw.split("/")[-1] if "/" in model_name_raw else model_name_raw
+        model_name = (
+            model_name_raw.split("/")[-1] if "/" in model_name_raw else model_name_raw
+        )
 
         # record the log file path this sample came from
         log_path = eval_log.location

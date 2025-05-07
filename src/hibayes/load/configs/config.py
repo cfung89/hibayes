@@ -1,7 +1,6 @@
 import datetime
-import logging
 from dataclasses import dataclass
-from typing import Any, BinaryIO, Dict, Iterator, List, Optional
+from typing import Any, Dict, List
 
 import yaml
 

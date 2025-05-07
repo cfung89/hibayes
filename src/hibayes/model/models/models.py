@@ -1,11 +1,5 @@
-import logging
-import os
-import pickle
-import sys
 from abc import ABC, abstractmethod
-from contextlib import nullcontext
-from copy import deepcopy
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from typing import (
     Any,
     Callable,
@@ -13,32 +7,21 @@ from typing import (
     Dict,
     List,
     Optional,
-    Set,
     Tuple,
     Type,
     Union,
 )
 
-import arviz as az
 import jax
 import jax.numpy as jnp
 import numpy as np
 import numpyro
 import numpyro.distributions as dist
 import pandas as pd
-import yaml
-from matplotlib import pyplot as plt
-from matplotlib.figure import Figure
 from numpyro.distributions.distribution import DistributionLike
-from numpyro.infer import HMC, MCMC, NUTS, Predictive
 
-from hibayes.ui import (
-    ModellingDisplay,
-    patch_fori_collect_with_rich_display,
-)
 from hibayes.utils import init_logger
 
-from .utils import logit_to_prob
 
 logger = init_logger()
 
@@ -93,9 +76,9 @@ class FitConfig:
 @dataclass
 class PriorConfig:
     distribution: DistributionLike  # The prior distribution
-    distribution_args: Dict[str, Any] | None = (
-        None  # Arguments for the prior distribution
-    )
+    distribution_args: Dict[
+        str, Any
+    ] | None = None  # Arguments for the prior distribution
 
     DISTRIBUTION_MAP: ClassVar[Dict[str, Type[DistributionLike]]] = {
         "normal": dist.Normal,
@@ -160,24 +143,26 @@ class ParameterConfig:
         if new_prior:
             if not self.prior:
                 raise ValueError(
-                    f"You cannot update the prior of a parameter that does not have one."
+                    "You cannot update the prior of a parameter that does not have one."
                 )
             self.prior.merge_in_dict(new_prior)
 
 
 @dataclass
 class ModelConfig:
-    mapping_name: dict[str, str] | None = (
+    mapping_name: dict[
+        str, str
+    ] | None = (
         None  # the key for mapping from data columns to any required_column names
     )
-    configurable_parameters: List[ParameterConfig] | None = (
-        None  # parameters user can adjust
-    )
+    configurable_parameters: List[
+        ParameterConfig
+    ] | None = None  # parameters user can adjust
     fit: FitConfig = field(default_factory=FitConfig)
 
-    main_effect_params: List[str] | None = (
-        None  # a list of the main effect parameters in the model which you would like to plot. If None then plot all - warning you might have thousands of parameters in the model
-    )
+    main_effect_params: List[
+        str
+    ] | None = None  # a list of the main effect parameters in the model which you would like to plot. If None then plot all - warning you might have thousands of parameters in the model
 
     def __post_init__(self):
         # Ensure no duplicate parameter names
@@ -240,7 +225,7 @@ class ModelConfig:
                         self.merge_parameter(value)
                     else:
                         raise ValueError(
-                            f"To update parameters you need to specify either a list of dicts or a single dict where for each parameter at least the parameter name and what you would like to change is detailed."
+                            "To update parameters you need to specify either a list of dicts or a single dict where for each parameter at least the parameter name and what you would like to change is detailed."
                         )
                 elif key == "fit":
                     if isinstance(value, dict):
@@ -537,7 +522,6 @@ class ModelSampleEffects(BaseModel):
 
 class ModelBetaBinomial(BaseModel):
     def _prepare_data(self, data: pd.DataFrame):
-
         # Aggregate if has not been done already
         # get nb total scores and nb correct scores
         if "n_correct" not in data.columns:
@@ -545,7 +529,7 @@ class ModelBetaBinomial(BaseModel):
                 data.groupby(["model", "task"])
                 .agg(n_correct=("score", "sum"), n_total=("score", "count"))
                 .reset_index()
-            )  
+            )
 
         # map categorical levels to integer codes
         model_index = data["model"].astype("category").cat.codes
@@ -665,7 +649,9 @@ class ModelBetaBinomial(BaseModel):
 
                     # Run binomial on observed data
                     numpyro.sample(
-                        "n_correct", dist.Binomial(total_count, success_prob), obs=count_obs
+                        "n_correct",
+                        dist.Binomial(total_count, success_prob),
+                        obs=count_obs,
                     )
 
                     # Observed is the proportion
@@ -685,7 +671,6 @@ class ModelBetaBinomial(BaseModel):
 
 class ModelBetaBinomialwSetup(BaseModel):
     def _prepare_data(self, data: pd.DataFrame):
-
         # Aggregate if has not been done already
         # get nb total scores and nb correct scores
         if "n_correct" not in data.columns:
@@ -693,7 +678,7 @@ class ModelBetaBinomialwSetup(BaseModel):
                 data.groupby(["model", "task", "setup"])
                 .agg(n_correct=("score", "sum"), n_total=("score", "count"))
                 .reset_index()
-            )  
+            )
 
         # map categorical levels to integer codes
         model_index = data["model"].astype("category").cat.codes
@@ -798,10 +783,10 @@ class ModelBetaBinomialwSetup(BaseModel):
                 # Calculate log-odds
                 logits = numpyro.deterministic(
                     "logits",
-                    overall_mean \
-                        + task_effects[task_index] \
-                        + model_effects[model_index] \
-                        + setup_effects[setup_index],
+                    overall_mean
+                    + task_effects[task_index]
+                    + model_effects[model_index]
+                    + setup_effects[setup_index],
                 )
 
                 # Convert to average probability
@@ -828,7 +813,9 @@ class ModelBetaBinomialwSetup(BaseModel):
 
                     # Run binomial on observed data
                     numpyro.sample(
-                        "n_correct", dist.Binomial(total_count, success_prob), obs=count_obs
+                        "n_correct",
+                        dist.Binomial(total_count, success_prob),
+                        obs=count_obs,
                     )
 
                     # Observed is the proportion
@@ -952,7 +939,9 @@ class ModelBinomial(BaseModel):
                 )
 
                 # Sample success probabilities from a Beta
-                success_prob = numpyro.deterministic("success_prob", jax.nn.sigmoid(logits))
+                success_prob = numpyro.deterministic(
+                    "success_prob", jax.nn.sigmoid(logits)
+                )
 
                 # Sample observations (n_correct)
                 if obs is not None:
@@ -961,7 +950,9 @@ class ModelBinomial(BaseModel):
 
                     # Run binomial on observed data
                     numpyro.sample(
-                        "n_correct", dist.Binomial(total_count, success_prob), obs=count_obs
+                        "n_correct",
+                        dist.Binomial(total_count, success_prob),
+                        obs=count_obs,
                     )
 
                     # Observed is the proportion

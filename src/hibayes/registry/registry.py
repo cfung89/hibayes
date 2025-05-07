@@ -3,7 +3,7 @@ import inspect
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Literal, Protocol, TypeVar, cast, runtime_checkable
+from typing import Any, Callable, Literal, cast
 
 from pydantic_core import to_jsonable_python
 
@@ -21,22 +21,6 @@ class RegistryInfo:
     type: RegistryType
     name: str
     metadata: dict[str, Any] = field(default_factory=dict)
-
-
-def registry_add(o: object, info: RegistryInfo) -> None:
-    """
-    Add an object to the registry.
-
-    Args:
-        o: The object to add.
-        info: The registry info.
-
-    """
-    # tag the object with the registry info
-    setattr(o, REGISTRY_INFO, info)
-
-    # add the object to the registry
-    _registry[registry_key(info.type, info.name)] = o
 
 
 def registry_key(type: RegistryType, name: str) -> str:

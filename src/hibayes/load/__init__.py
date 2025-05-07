@@ -1,6 +1,6 @@
 from .configs.config import DataLoaderConfig
 from .extractors import MetadataExtractor
-from .load import LogProcessor, get_sample_df
+from .load import LogProcessor
 
 __all__ = [
     "LogProcessor",

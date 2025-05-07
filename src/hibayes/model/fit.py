@@ -1,15 +1,9 @@
-from typing import Optional, Union
-
 import arviz as az
 import jax
-import numpy as np
-import numpyro
-from numpyro import handlers
 from numpyro.infer import HMC, MCMC, NUTS
 
 from ..analysis_state import ModelAnalysisState
-from ..ui import ModellingDisplay, patch_fori_collect_with_rich_display
-from ..utils import init_logger
+from ..ui import ModellingDisplay
 
 
 def fit(model_analysis_state: ModelAnalysisState, display: ModellingDisplay) -> None:

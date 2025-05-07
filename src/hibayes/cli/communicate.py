@@ -1,7 +1,6 @@
 import argparse
 import pathlib
 
-import pandas as pd
 
 from ..analysis import AnalysisConfig, AnalysisState, communicate
 from ..ui import ModellingDisplay

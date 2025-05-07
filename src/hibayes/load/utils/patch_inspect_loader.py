@@ -1,47 +1,31 @@
 # patch inspect to extract sample ids when reading the header.
-import argparse
-import datetime
 import json
 import logging
 import os
 import tempfile
-import time
-from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
 from typing import (
     Any,
     BinaryIO,
     Dict,
-    Iterator,
     List,
     Literal,
-    Optional,
-    Tuple,
-    Union,
     get_args,
 )
 from zipfile import ZipFile
 
 import ijson
 import inspect_ai.log._recorders.eval
-import pandas as pd
-import pytz
-import yaml
 from ijson import IncompleteJSONError
 from inspect_ai._util.constants import LOG_SCHEMA_VERSION
 from inspect_ai._util.file import file, filesystem
 from inspect_ai.log import (
     EvalError,
     EvalLog,
-    EvalLogInfo,
     EvalPlan,
     EvalResults,
     EvalSample,
     EvalSpec,
     EvalStats,
-    list_eval_logs,
-    read_eval_log,
-    read_eval_log_sample,
 )
 from inspect_ai.log._recorders.create import _recorders
 from inspect_ai.log._recorders.eval import (
@@ -54,7 +38,6 @@ from inspect_ai.log._recorders.json import (
     JSONRecorder,  # main recorder for .json logs (current inspect default)
     _validate_version,
 )
-from inspect_ai.log._recorders.recorder import Recorder
 from pydantic import BaseModel
 from pydantic_core import from_json
 from typing_extensions import override
@@ -139,8 +122,6 @@ def read_sample_header(zip: ZipFile, sample: str) -> LogSample:
 def patched_read_log(
     log: BinaryIO, location: str, header_only: bool = False
 ) -> EvalLog:
-    start_time = time.time()
-
     with ZipFile(log, mode="r") as zip:
         evalLog = _read_header(zip, location)
         if REDUCTIONS_JSON in zip.namelist():

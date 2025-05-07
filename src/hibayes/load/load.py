@@ -1,22 +1,16 @@
-import argparse
 import datetime
 import json
-import logging
 import os
 import tempfile
-import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import nullcontext
-from dataclasses import dataclass
-from typing import Any, BinaryIO, Dict, Iterator, List, Optional
+from typing import Any, Dict, Iterator, List, Optional
 
 import pandas as pd
 import pytz
-import yaml
 from inspect_ai.log import (
     EvalLog,
     EvalLogInfo,
-    EvalSample,
     list_eval_logs,
     read_eval_log,
     read_eval_log_sample,
@@ -27,10 +21,7 @@ from hibayes.utils import init_logger
 from ..ui.display import ModellingDisplay
 from .configs.config import DataLoaderConfig
 from .extractors import (
-    BaseMetadataExtractor,
     MetadataExtractor,
-    TokenExtractor,
-    ToolsExtractor,
 )
 from .utils import (
     LogSample,
@@ -177,9 +168,7 @@ def process_eval_logs_parallel(
     from tqdm import tqdm
 
     if display:
-        identify_task = display.add_task(
-            "Identifying processing tasks", total=len(eval_logs)
-        )
+        display.add_task("Identifying processing tasks", total=len(eval_logs))
         eval_logs_iterable = eval_logs
     else:
         eval_logs_iterable = tqdm(eval_logs, desc="Identifying processing tasks")
