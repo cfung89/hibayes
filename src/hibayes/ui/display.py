@@ -1,33 +1,26 @@
 import contextlib
 import logging
 import time
-import types
 from functools import partial
 from threading import Lock
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional
 
 import jax
 import jax.numpy as jnp
 import numpyro
-import numpyro.distributions as dist
-from numpyro.infer import MCMC, NUTS
 from rich import box
-from rich.console import Console
 from rich.layout import Layout
 from rich.live import Live
-from rich.logging import RichHandler
 from rich.panel import Panel
 from rich.progress import (
     BarColumn,
     Progress,
     SpinnerColumn,
-    TaskProgressColumn,
     TextColumn,
     TimeElapsedColumn,
     TimeRemainingColumn,
 )
 from rich.prompt import Confirm
-from rich.style import Style
 from rich.table import Table
 from rich.text import Text
 

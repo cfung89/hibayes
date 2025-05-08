@@ -1,7 +1,6 @@
 import copy
-import dataclasses
-from collections.abc import Mapping, Sequence
-from typing import Any, Type, TypeVar, get_args, get_origin, get_type_hints
+from collections.abc import Sequence
+from typing import Type, TypeVar
 
 import jax.numpy as jnp
 

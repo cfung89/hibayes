@@ -1,19 +1,13 @@
-import datetime
-import logging
-from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
 
 import pandas as pd
 import yaml
-from rich.logging import RichHandler
 
-from .analyse import CheckerConfig, prior_predictive_plot
+from .analyse import CheckerConfig
 from .analysis_state import AnalysisState, ModelAnalysisState
 from .communicate import CommunicateConfig
 from .load import (
     DataLoaderConfig,
-    LogProcessor,
     get_sample_df,
 )
 from .model import (
@@ -23,7 +17,6 @@ from .model import (
 from .platform import PlatformConfig, configure_computation_platform
 from .registry import registry_info
 from .ui import ModellingDisplay
-from .utils import init_logger
 
 # TODO: data loader which checks if .json or .eval is passed
 # TODO: before data is loaded from eval logs check that the extractors are going

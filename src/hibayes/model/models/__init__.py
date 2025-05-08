@@ -4,6 +4,7 @@ from .models import (
     ModelSampleEffects,
     ModelBetaBinomial,
     ModelBinomial,
+    ModelBetaBinomialwSetup,
 )
 
 __all__ = [
@@ -13,4 +14,5 @@ __all__ = [
     "ModelsToRunConfig",
     "ModelBetaBinomial",
     "ModelBinomial",
+    "ModelBetaBinomialwSetup",
 ]

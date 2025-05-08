@@ -47,6 +47,22 @@ if you would like to contribute please install the dev dependencies:
 ```bash
 uv pip install -e .[dev]
 ```
+We use pre-commit to ensure code quality. To set this up run:
+
+```bash
+uv run pre-commit install
+```
+This will set up pre-commit hooks to run on every commit. You can also run the pre-commit hooks manually with:
+
+```bash
+uv run pre-commit run --all-files
+```
+to then make a commit.
+```bash
+git add .
+uv run commit -m "your commit message"
+```
+Note that you need to have your environment activated for the pre-commit hooks to work.
 
 
 ## DVC

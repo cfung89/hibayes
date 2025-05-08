@@ -3,7 +3,7 @@ import os
 import pickle
 from dataclasses import asdict, is_dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Tuple
 
 import matplotlib.pyplot as plt
 import pandas as pd
@@ -269,9 +269,9 @@ class AnalysisState:
             data  # extracted data from inspect eval logs see hibayes.load for details
         )
         self._models: List[ModelAnalysisState] = models
-        self._communicate: Dict[str, plt.Figure | pd.DataFrame] | None = (
-            communicate  # plots of findings
-        )
+        self._communicate: Dict[
+            str, plt.Figure | pd.DataFrame
+        ] | None = communicate  # plots of findings
 
     @property
     def data(self) -> pd.DataFrame:

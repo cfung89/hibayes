@@ -1,9 +1,9 @@
 import datetime
-import logging
 from dataclasses import dataclass
-from typing import Any, BinaryIO, Dict, Iterator, List, Optional
+from typing import Any, Dict, List
 
 import yaml
+
 from hibayes.utils import init_logger
 
 from ..extractors import (
@@ -40,6 +40,26 @@ class DataLoaderConfig:
     max_workers: int = 10
     batch_size: int = 1000
     cutoff: datetime.datetime | None = None
+
+    def __init__(
+        self,
+        enabled_extractors: List[str] | None = None,
+        custom_extractors: List[MetadataExtractor] | None = None,
+        files_to_process: List[str] | None = None,
+        cache_path: str | None = None,
+        output_dir: str | None = None,
+        max_workers: int = 10,
+        batch_size: int = 1000,
+        cutoff: datetime.datetime | None = None,
+    ):
+        self.enabled_extractors = enabled_extractors or self.DEFAULT_EXTRACTORS
+        self.custom_extractors = custom_extractors or []
+        self.files_to_process = files_to_process or []
+        self.cache_path = cache_path
+        self.output_dir = output_dir
+        self.max_workers = max_workers
+        self.batch_size = batch_size
+        self.cutoff = cutoff
 
     @classmethod
     def from_yaml(cls, yaml_path: str) -> "DataLoaderConfig":
@@ -104,8 +124,3 @@ class DataLoaderConfig:
             cache_path=cache_path,
             output_dir=output_dir,
         )
-
-    @classmethod
-    def create_default(cls) -> "DataLoaderConfig":
-        """Create a default configuration."""
-        return cls()

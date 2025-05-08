@@ -1,6 +1,3 @@
-import logging
-from abc import ABC, abstractmethod
-from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import (
     Any,
@@ -9,20 +6,20 @@ from typing import (
     Iterator,
     List,
     Optional,
-    Set,
-    Tuple,
     Type,
     Union,
 )
 
 import pandas as pd
 import yaml
+
 from hibayes.utils import init_logger
 
 from ..analysis_state import ModelAnalysisState
 from .models import (
     BaseModel,
     ModelBetaBinomial,
+    ModelBetaBinomialwSetup,
     ModelBinomial,
     ModelConfig,
     ModelSampleEffects,
@@ -44,6 +41,7 @@ class ModelsToRunConfig:
         "CompareVarEffects": None,
         "ModelSampleEffects": ModelSampleEffects,
         "ModelBetaBinomial": ModelBetaBinomial,
+        "ModelBetaBinomialwSetup": ModelBetaBinomialwSetup,
         "ModelBinomial": ModelBinomial,
     }
 
@@ -140,7 +138,6 @@ class ModelsToRunConfig:
 
         try:
             import importlib.util
-            import inspect
 
             module_path = config.get("path", None)
             if module_path:
