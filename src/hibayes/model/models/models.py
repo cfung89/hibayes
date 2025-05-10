@@ -1,11 +1,12 @@
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import (
     Any,
     Callable,
     ClassVar,
     Dict,
     List,
+    Literal,
     Optional,
     Tuple,
     Type,
@@ -22,55 +23,32 @@ from numpyro.distributions.distribution import DistributionLike
 
 from hibayes.utils import init_logger
 
-
 logger = init_logger()
 
 Features = Dict[str, float | int | jnp.ndarray | np.ndarray]
 Coords = Dict[
     str, Dict[str, jnp.ndarray | np.ndarray]
 ]  # arviz information on how to map indexes to names. Here we store both the coords and the dims values
+Method = Literal["NUTS", "HMC"]  # MCMC sampler type
+ChainMethod = Literal["parallel", "sequential", "vectorised"]
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class FitConfig:
-    method: str = "NUTS"  # MCMC sampler type
-    samples: int = 1000  # Number of posterior samples to draw
-    warmup: int = 500  # Number of warmup samples
-    chains: int = 4  # Number of MCMC chains to run
-    seed: int = 0  # Random seed for reproducibility
-    progress_bar: bool = True  # Show progress bar during sampling
-    parallel: bool = True  # Whether to run chains in parallel
-    chain_method: str = "parallel"  # parallel, sequential, or vectorised
-    target_accept: float = 0.8  # Target acceptance rate for NUTS
-    max_tree_depth: int = 10  # Max tree depth for NUTS
+    method: Method = "NUTS"
+    samples: int = 1000
+    warmup: int = 500
+    chains: int = 4
+    seed: int = 0
+    progress_bar: bool = True
+    parallel: bool = True
+    chain_method: ChainMethod = "parallel"
+    target_accept: float = 0.8
+    max_tree_depth: int = 10
 
-    def merge_in_dict(self, config_dict: Dict[str, Any]) -> None:
-        """
-        Merge a dictionary into the existing configuration.
-        """
-        if not config_dict:
-            return
-
-        for key, value in config_dict.items():
-            if hasattr(self, key):
-                if key == "method":
-                    if value not in ["NUTS", "HMC"]:
-                        raise ValueError(
-                            f"Unsupported inference method: {value}. Supported methods are: NUTS, HMC"
-                        )
-                    self.method = value
-                elif key == "chain_method":
-                    if value not in ["parallel", "sequential", "vectorised"]:
-                        raise ValueError(
-                            f"Unsupported chain_method: {value}. Supported methods are: parallel, sequential, vectorised"
-                        )
-                    self.chain_method = value
-                else:
-                    setattr(self, key, value)
-            else:
-                raise ValueError(
-                    f"Invalid configuration for {self.__class__.__name__} key: {key}"
-                )
+    def merged(self, **updates: Any) -> "FitConfig":
+        """Return a *new* FitConfig with `updates` applied."""
+        return replace(self, **updates)
 
 
 @dataclass
@@ -357,173 +335,6 @@ class BaseModel(ABC):
         return cls.__name__
 
 
-class ModelSampleEffects(BaseModel):
-    """
-    Hierarchical Binomial‑logit model estimating each model × sample cell
-    without first aggregating either over models or over samples.
-
-    Design choices
-    --------------
-    * **Global intercept** (`overall_mean`) uses a non‑centred parameterisation.
-    * **Model‑level** and **sample‑level** effects are *zero‑centred* random
-      effects.  We purposely drop the extra group‑specific mean terms that
-      caused the previous "triple‑counting" of the intercept.
-    * The likelihood is expressed in **logit (log‑odds) space** via the
-      `logits=` argument, which is numerically stabler than converting to
-      probabilities first.
-    """
-
-    @classmethod
-    def get_default_config(cls):
-        config = super().get_default_config()
-
-        config.configurable_parameters = [
-            # global intercept hyper‑priors
-            ParameterConfig(
-                name="mu_overall",
-                prior=PriorConfig(
-                    distribution=dist.Normal,
-                    distribution_args={"loc": 0.0, "scale": 1.0},
-                ),
-            ),
-            ParameterConfig(
-                name="sigma_overall",
-                prior=PriorConfig(
-                    distribution=dist.HalfNormal,
-                    distribution_args={"scale": 1.0},
-                ),
-            ),
-            ParameterConfig(  # raw N(0,1) for non‑centred param
-                name="z_overall",
-                prior=PriorConfig(
-                    distribution=dist.Normal,
-                    distribution_args={"loc": 0.0, "scale": 1.0},
-                ),
-            ),
-            # group‑level standard deviations
-            ParameterConfig(
-                name="sigma_sample",
-                prior=PriorConfig(
-                    distribution=dist.HalfNormal,
-                    distribution_args={"scale": 0.5},
-                ),
-            ),
-            ParameterConfig(
-                name="sigma_model",
-                prior=PriorConfig(
-                    distribution=dist.HalfNormal,
-                    distribution_args={"scale": 0.5},
-                ),
-            ),
-        ]
-
-        config.main_effect_params = [
-            "overall_mean",
-            "sample_effects",
-            "model_effects",
-            "model_sample_effects",
-        ]
-        return config
-
-    def _prepare_data(self, data: pd.DataFrame):
-        """Aggregate successes and trials for every (model, sample) pair."""
-        agg_data = (
-            data.groupby(["model", "sample"], observed=True)
-            .agg(success_count=("success", "sum"), total_count=("success", "count"))
-            .reset_index()
-        )
-
-        # map categorical levels to integer codes
-        model_index = agg_data["model"].astype("category").cat.codes.values
-        sample_index = agg_data["sample"].astype("category").cat.codes.values
-
-        model_names = agg_data["model"].astype("category").cat.categories
-        sample_names = agg_data["sample"].astype("category").cat.categories
-
-        features = {
-            "model_index": jnp.array(model_index),
-            "sample_index": jnp.array(sample_index),
-            "num_models": int(agg_data["model"].nunique()),
-            "num_samples": int(agg_data["sample"].nunique()),
-            "total_count": jnp.array(agg_data["total_count"].values),
-            "obs": jnp.array(agg_data["success_count"].values),
-        }
-
-        coords = {
-            "coords": {
-                "model": model_names,
-                "sample": sample_names,
-            },
-            "dims": {
-                "model_effects": ["model"],
-                "sample_effects": ["sample"],
-            },
-        }
-        return features, coords
-
-    def build_model(self) -> Callable[..., Any]:
-        def model(
-            num_models: int,
-            num_samples: int,
-            total_count: jnp.ndarray,
-            model_index: jnp.ndarray,
-            sample_index: jnp.ndarray,
-            obs=None,
-        ):
-            # ------------------ Global intercept (non‑centred) ---------
-            mu_overall = numpyro.sample(
-                **self.config.parameter_to_numpyro("mu_overall")
-            )
-            sigma_overall = numpyro.sample(
-                **self.config.parameter_to_numpyro("sigma_overall")
-            )
-            z_overall = numpyro.sample(**self.config.parameter_to_numpyro("z_overall"))
-            overall_mean = numpyro.deterministic(
-                "overall_mean", mu_overall + sigma_overall * z_overall
-            )
-
-            # ------------------ Sample‑level random effects ------------
-            sigma_sample = numpyro.sample(
-                **self.config.parameter_to_numpyro("sigma_sample")
-            )
-            sample_raw = numpyro.sample(
-                "sample_raw",
-                dist.Normal(0.0, 1.0).expand([num_samples]),
-            )
-            sample_effects = numpyro.deterministic(
-                "sample_effects", sigma_sample * sample_raw
-            )  # zero‑centred
-
-            # ------------------ Model‑level random effects -------------
-            sigma_model = numpyro.sample(
-                **self.config.parameter_to_numpyro("sigma_model")
-            )
-            model_raw = numpyro.sample(
-                "model_raw",
-                dist.Normal(0.0, 1.0).expand([num_models]),
-            )
-            model_effects = numpyro.deterministic(
-                "model_effects", sigma_model * model_raw
-            )  # zero‑centred
-
-            # ------------------ Linear predictor -----------------------
-            eta = numpyro.deterministic(
-                "model_sample_effects",
-                overall_mean
-                + sample_effects[sample_index]
-                + model_effects[model_index],
-            )
-
-            # ------------------ Likelihood ----------------------------
-            numpyro.sample(
-                "obs",
-                dist.Binomial(total_count=total_count, logits=eta),
-                obs=obs,
-            )
-
-        return model
-
-
 class ModelBetaBinomial(BaseModel):
     def _prepare_data(self, data: pd.DataFrame):
         # Aggregate if has not been done already
@@ -634,6 +445,179 @@ class ModelBetaBinomial(BaseModel):
 
                 # Overdispersion parameter (controls how much probabilities vary)
                 dispersion_phi = numpyro.sample("dispersion_phi", dist.Gamma(1.0, 0.1))
+
+                # Calculate alpha and beta for Beta distribution
+                beta_alpha = avg_success_prob * dispersion_phi
+                beta_beta = (1 - avg_success_prob) * dispersion_phi
+
+                # Sample success probabilities from a Beta
+                success_prob = numpyro.sample(
+                    "success_prob", dist.Beta(beta_alpha, beta_beta)
+                )
+
+                # Sample observations (n_correct)
+                if obs is not None:
+                    # Convert proportions to counts
+                    count_obs = jnp.round(obs * total_count).astype(jnp.int32)
+
+                    # Run binomial on observed data
+                    numpyro.sample(
+                        "n_correct",
+                        dist.Binomial(total_count, success_prob),
+                        obs=count_obs,
+                    )
+
+                    # Observed is the proportion
+                    numpyro.deterministic("obs", obs)
+
+                # If no observations are provided, sample from the model (prior predictive)
+                else:
+                    # Generate count predictions
+                    count_pred = numpyro.sample(
+                        "n_correct", dist.Binomial(total_count, success_prob)
+                    )
+                    # Convert counts to proportions
+                    numpyro.deterministic("obs", count_pred / total_count)
+
+        return model
+
+
+class TwoRandomEffectsBetaBinomial(BaseModel):
+    @classmethod
+    def get_default_config(cls):
+        config = super().get_default_config()
+
+        config.configurable_parameters = [
+            ParameterConfig(
+                name="overall_mean",
+                prior=PriorConfig(
+                    distribution=dist.Normal,
+                    distribution_args={"loc": 0.0, "scale": 0.3},
+                ),
+            ),
+            ParameterConfig(
+                name="random_1_effects",
+                prior=PriorConfig(
+                    distribution=dist.Normal,
+                    distribution_args={"loc": 0.0, "scale": 0.3},
+                ),
+            ),
+            ParameterConfig(
+                name="random_2_effects",
+                prior=PriorConfig(
+                    distribution=dist.Normal,
+                    distribution_args={"loc": 0.0, "scale": 0.3},
+                ),
+            ),
+            ParameterConfig(
+                name="dispersion_phi",
+                prior=PriorConfig(
+                    distribution=dist.Gamma,
+                    distribution_args={"concentration": 1.0, "rate": 0.1},
+                ),
+            ),
+        ]
+
+        config.main_effect_params = [
+            "overall_mean",
+            "random_1_effects",
+        ]
+
+        return config
+
+    def _prepare_data(self, data: pd.DataFrame):
+        # Aggregate if has not been done already
+        # get nb total scores and nb correct scores
+        if "n_correct" not in data.columns:
+            data = (
+                data.groupby(["random_1", "random_2"])
+                .agg(n_correct=("score", "sum"), n_total=("score", "count"))
+                .reset_index()
+            )
+
+        # map categorical levels to integer codes
+        random_1_index = data["random_1"].astype("category").cat.codes
+        random_2_index = data["random_2"].astype("category").cat.codes
+
+        random_1_names = data["random_1"].astype("category").cat.categories
+        random_2_names = data["random_2"].astype("category").cat.categories
+
+        features = {
+            "random_1_index": jnp.array(random_1_index),
+            "random_2_index": jnp.array(random_2_index),
+            "num_random_1": int(data["random_1"].nunique()),
+            "num_random_2": int(data["random_2"].nunique()),
+            "total_count": jnp.array(data["n_total"].values),
+            "obs": jnp.array(
+                data["n_correct"].values / data["n_total"].values
+            ),  # Proportions
+        }
+
+        coords = {
+            "coords": {
+                "random_1": random_1_names,
+                "random_2": random_2_names,
+            },
+            "dims": {
+                "random_1_effects": ["random_1"],
+                "random_2_effects": ["random_2"],
+            },
+        }
+        return features, coords
+
+    def build_model(self) -> Callable[..., Any]:
+        def model(
+            num_random_1: int,
+            num_random_2: int,
+            total_count: jnp.ndarray,
+            random_1_index: jnp.ndarray,
+            random_2_index: jnp.ndarray,
+            obs=None,  # proportion of successes
+        ):
+            # ------------------ Global intercept -----------------------
+            # overall_mean = numpyro.sample("overall_mean", dist.Normal(0, 0.3))
+            overall_mean = numpyro.sample(
+                **self.config.parameter_to_numpyro("overall_mean")
+            )
+
+            # ------------------ Task‑level random effects ------------
+
+            # Separate parameter for each task
+            with numpyro.plate("random_2_plate", num_random_2):
+                random_2_effects = numpyro.sample(
+                    **self.config.parameter_to_numpyro("random_2_effects")
+                )
+
+            # ------------------ Model‑level random effects -------------
+
+            # Separate parameter for each model
+            with numpyro.plate("random_1_plate", num_random_1):
+                random_1_effects = numpyro.sample(
+                    **self.config.parameter_to_numpyro("random_1_effects")
+                )
+
+            # For each observation compute the logit and the success probability
+            # (instead of for loop do it with numpyro.plate)
+            data_size = len(random_1_index)
+            with numpyro.plate("data", data_size):
+                # ---------------- Probability of success ---------------------
+                # Calculate log-odds
+                logits = numpyro.deterministic(
+                    "logits",
+                    overall_mean
+                    + random_2_effects[random_2_index]
+                    + random_1_effects[random_1_index],
+                )
+
+                # Convert to average probability
+                avg_success_prob = numpyro.deterministic(
+                    "avg_success_prob", jax.nn.sigmoid(logits)
+                )
+
+                # Overdispersion parameter (controls how much probabilities vary)
+                dispersion_phi = numpyro.sample(
+                    **self.config.parameter_to_numpyro("dispersion_phi")
+                )
 
                 # Calculate alpha and beta for Beta distribution
                 beta_alpha = avg_success_prob * dispersion_phi
