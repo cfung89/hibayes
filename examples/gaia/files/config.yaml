@@ -24,7 +24,7 @@ data_inspector:
 model:
   models:
     ModelSampleEffects:
-      mapping_name:
+      column_map:
         score: success
         task: sample
       fit:

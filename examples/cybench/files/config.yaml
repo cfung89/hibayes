@@ -1,12 +1,12 @@
 model:
   models:
     ModelBetaBinomial:
-      mapping_name:
+      column_map:
         Success Count: n_correct
         Total Attempts: n_total
         Sample ID: task
     ModelBinomial:
-      mapping_name:
+      column_map:
         Success Count: n_correct
         Total Attempts: n_total
         Sample ID: task

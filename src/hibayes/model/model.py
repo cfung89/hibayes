@@ -19,10 +19,8 @@ from ..analysis_state import ModelAnalysisState
 from .models import (
     BaseModel,
     ModelBetaBinomial,
-    ModelBetaBinomialwSetup,
     ModelBinomial,
     ModelConfig,
-    ModelSampleEffects,
 )
 
 logger = init_logger()
@@ -34,14 +32,7 @@ class ModelsToRunConfig:
 
     DEFAULT_MODELS: ClassVar[List[str]] = ["ModelBetaBinomial"]
     AVAILABLE_MODELS: ClassVar[Dict[str, Type[BaseModel]]] = {
-        "EmpiricalMean": None,  # Replace with actual classes when available
-        "ModelMean": None,
-        "ModelDomainGLM": None,
-        "ModelDomainClusterGLM": None,
-        "CompareVarEffects": None,
-        "ModelSampleEffects": ModelSampleEffects,
         "ModelBetaBinomial": ModelBetaBinomial,
-        "ModelBetaBinomialwSetup": ModelBetaBinomialwSetup,
         "ModelBinomial": ModelBinomial,
     }
 
@@ -133,9 +124,25 @@ class ModelsToRunConfig:
     def _load_custom_models(
         config: dict[str, dict],
     ) -> List[tuple[Type[BaseModel], Optional[ModelConfig]]]:
-        """Load custom model classes from the specified path."""
-        custom_models: List[tuple[Type[BaseModel], Optional[ModelConfig]]] = []
+        """
+        Load user supplied model classes.
 
+        Expected YAML shape::
+
+            custom_models:
+              path: /abs/path/to/file.py
+              classes:
+               # either list: default args
+                - MyModel
+                - AnotherModel
+
+                # or a dict: per model config dicts
+                MyModelWithArgs:
+                  fit:
+                    samples: 2_000
+                BareModel: {}
+        """
+        custom_models: list[tuple[Type[BaseModel], Optional[dict[str, Any]]]] = []
         try:
             import importlib.util
 
@@ -147,15 +154,18 @@ class ModelsToRunConfig:
                 if spec is not None and spec.loader is not None:
                     module = importlib.util.module_from_spec(spec)
                     spec.loader.exec_module(module)
-                    for model_name in config.get(
-                        "classes",
-                    ):
+                    classes_cfg = config.get("classes", {})
+                    # Allow both list[str] and Mapping[str, dict] forms
+                    if isinstance(classes_cfg, dict):
+                        iterable = classes_cfg.items()  # (name, cfg)
+                    else:  # assume list / tuple
+                        iterable = ((name, None) for name in classes_cfg)
+
+                    for model_name, model_cfg in iterable:
                         if hasattr(module, model_name):
                             model_class = getattr(module, model_name)
                             if issubclass(model_class, BaseModel):
-                                custom_models.append(
-                                    (model_class, None)
-                                )  # for now custom models use their default config. TODO: update to allow custom config.
+                                custom_models.append((model_class, model_cfg))
                                 logger.info(f"Loaded custom model: {model_name}")
                             else:
                                 logger.warning(

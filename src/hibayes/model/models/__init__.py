@@ -1,18 +1,22 @@
 from .models import (
     BaseModel,
-    ModelConfig,
-    ModelSampleEffects,
     ModelBetaBinomial,
-    ModelBinomial,
     ModelBetaBinomialwSetup,
+    ModelBinomial,
+    ModelConfig,
+    FitConfig,
+    ParameterConfig,
+    PriorConfig,
 )
 
 __all__ = [
     "BaseModel",
     "ModelConfig",
-    "ModelSampleEffects",
     "ModelsToRunConfig",
     "ModelBetaBinomial",
     "ModelBinomial",
     "ModelBetaBinomialwSetup",
+    "FitConfig",
+    "ParameterConfig",
+    "PriorConfig",
 ]

@@ -21,9 +21,16 @@ data_loader:
         - LogFileNameExtractor
 model:
   models:
-    ModelBinomial:
     ModelBetaBinomial:
-    ModelBetaBinomialwSetup:
+      column_map:
+        Success Count: n_correct
+        Total Attempts: n_total
+        Sample ID: task
+    ModelBinomial:
+      column_map:
+        Success Count: n_correct
+        Total Attempts: n_total
+        Sample ID: task
 platform:
 checkers:
   checks:

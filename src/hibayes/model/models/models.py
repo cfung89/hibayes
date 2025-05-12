@@ -51,7 +51,7 @@ class FitConfig:
         return replace(self, **updates)
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class PriorConfig:
     distribution: DistributionLike  # The prior distribution
     distribution_args: Dict[
@@ -76,66 +76,68 @@ class PriorConfig:
             return self.distribution()
         return self.distribution(**self.distribution_args)
 
-    def merge_in_dict(self, config_dict: Dict[str, Any]) -> None:
+    def merged(self, config_dict: Dict[str, Any]) -> "PriorConfig":
         """
         Merge a dictionary into the existing configuration.
         """
-        if not config_dict:
-            return
+        distribution_name = config_dict.pop("distribution", None)
+        distribution_args = config_dict.pop("distribution_args", None)
+        old_distribution_args = self.distribution_args or {}
 
-        for key, value in config_dict.items():
-            if hasattr(self, key):
-                if key == "distribution":
-                    if value in self.DISTRIBUTION_MAP:
-                        self.distribution = self.DISTRIBUTION_MAP[value]
-                    else:
-                        raise ValueError(
-                            f"Unsupported distribution: {value}. Supported distributions are: {', '.join(self.DISTRIBUTION_MAP.keys())}"
-                        )
-                elif key == "distribution_args":
-                    if isinstance(value, dict):
-                        self.distribution_args.update(value)
-                else:
-                    raise ValueError(
-                        f"Invalid configuration for {self.__class__.__name__} key: {key}"
-                    )
-            else:
+        # if update to distribution
+        if (
+            distribution_name
+            and not self.DISTRIBUTION_MAP[distribution_name] == self.distribution
+        ):
+            if distribution_name not in self.DISTRIBUTION_MAP:
                 raise ValueError(
-                    f"Invalid configuration for {self.__class__.__name__} key: {key}"
+                    f"Invalid distribution name '{distribution_name}'. Valid options are: {list(self.DISTRIBUTION_MAP.keys())}"
                 )
+            distribution_class = self.DISTRIBUTION_MAP[distribution_name]
+            config_dict["distribution"] = distribution_class
+
+            # as new distribution class we should remove the old args
+            old_distribution_args = {}
+
+        if distribution_args is not None:
+            if not isinstance(distribution_args, dict):
+                raise ValueError(
+                    "distribution_args must be a dictionary of arguments for the distribution."
+                )
+            old_distribution_args.update(distribution_args)
+        config_dict["distribution_args"] = old_distribution_args
+        return replace(self, **config_dict)
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class ParameterConfig:
     name: str  # Name of the parameter in the model
     prior: PriorConfig | None = None  # Prior distribution for the parameter
 
-    def merge_in_dict(self, config_dict: Dict[str, Any]) -> None:
+    def merge_in_dict(self, config_dict: Dict[str, Any]) -> "ParameterConfig":
         new_param_name = config_dict.get("name")
-        new_prior = config_dict.get("prior", {})
-
         if new_param_name != self.name:
             raise ValueError(
                 f"Parameter name mismatch: '{new_param_name}' does not match '{self.name}'. You cannot update parameter names as they are called in the model."
             )
-        if new_prior:
+        if new_prior := config_dict.get("prior", None):
             if not self.prior:
                 raise ValueError(
                     "You cannot update the prior of a parameter that does not have one."
                 )
-            self.prior.merge_in_dict(new_prior)
+            config_dict["prior"] = self.prior.merged(new_prior)
+        return replace(self, **config_dict)
 
 
 @dataclass
 class ModelConfig:
-    mapping_name: dict[
-        str, str
-    ] | None = (
-        None  # the key for mapping from data columns to any required_column names
-    )
-    configurable_parameters: List[
-        ParameterConfig
-    ] | None = None  # parameters user can adjust
+    column_map: Optional[
+        Dict[str, str]
+    ] = None  # the key for mapping from data columns to any required_column names
+    configurable_parameters: Optional[List[ParameterConfig]] = field(
+        default_factory=list
+    )  # parameters user can adjust
+
     fit: FitConfig = field(default_factory=FitConfig)
 
     main_effect_params: List[
@@ -166,14 +168,16 @@ class ModelConfig:
             return numpyro_args
         raise ValueError(f"Parameter '{param}' not found in model configuration")
 
-    def get_plot_params(self) -> List[str]:
+    def get_plot_params(self) -> List[str] | None:
         """
         Get a list of parameters to plot based on the configuration."""
         return self.main_effect_params
 
-    def get_params(self) -> List[str]:
+    def get_params(self) -> List[str] | None:
         """
         Get a list of all configurable parameters in the model config."""
+        if self.configurable_parameters is None:
+            return None
         return [param.name for param in self.configurable_parameters]
 
     def get_param(self, param: str) -> ParameterConfig | None:
@@ -187,77 +191,53 @@ class ModelConfig:
                 return parameter
         return None
 
-    def merge_in_dict(self, config_dict: Dict[str, Any]) -> None:
+    def merge_in_dict(self, config_dict: Dict[str, Any]) -> "ModelConfig":
         """
-        Merge a dictionary into the existing configuration.
+        Return a config with a merge of default and user specified values.
         """
-        if not config_dict:
-            return
 
-        for key, value in config_dict.items():
-            if hasattr(self, key):
-                if key == "configurable_parameters":
-                    if isinstance(value, list):
-                        self.merge_parameters(value)
-                    elif isinstance(value, dict):
-                        self.merge_parameter(value)
-                    else:
-                        raise ValueError(
-                            "To update parameters you need to specify either a list of dicts or a single dict where for each parameter at least the parameter name and what you would like to change is detailed."
-                        )
-                elif key == "fit":
-                    if isinstance(value, dict):
-                        self.fit.merge_in_dict(value)
-                    else:
-                        raise ValueError(
-                            f"Invalid configuration for {self.__class__.__name__} key: {key}"
-                        )
-                elif key == "platform":
-                    if isinstance(value, dict):
-                        self.platform.merge_in_dict(value)
-                    else:
-                        raise ValueError(
-                            f"Invalid configuration for {self.__class__.__name__} key: {key}"
-                        )
-                elif key == "mapping_name":
-                    if isinstance(value, dict):
-                        self.mapping_name = value  # do not combine, mapping dict should be user defined.
-                    else:
-                        raise ValueError(
-                            f"Invalid configuration for {self.__class__.__name__} key: {key}"
-                        )
-                else:
+        fit_updates = config_dict.get("fit", {})
+        new_fit = self.fit.merged(**fit_updates)
+
+        new_column_map = config_dict.get("column_map", self.column_map)
+
+        new_main_effect_params = config_dict.get(
+            "main_effect_params", self.main_effect_params
+        )
+
+        if "configurable_parameters" in config_dict:
+            param_updates = config_dict["configurable_parameters"]
+            if isinstance(param_updates, dict):  # only update a single parameter
+                param_updates_iter = [param_updates]
+            elif isinstance(param_updates, list):  # assuming a list of Mapping
+                if not all(isinstance(param, dict) for param in param_updates):
                     raise ValueError(
-                        f"Invalid configuration for {self.__class__.__name__} key: {key}"
+                        "To update parameters you need to specify either a list of dicts or a single dict where for each parameter at least the parameter name and what you would like to change is detailed."
                     )
-
+                param_updates_iter = param_updates
             else:
                 raise ValueError(
-                    f"Invalid configuration for {self.__class__.__name__} key: {key}"
+                    "To update parameters you need to specify either a list of dicts or a single dict where for each parameter at least the parameter name and what you would like to change is detailed."
                 )
-
-    def merge_parameters(self, new_params: List[Dict[str, Any]]) -> None:
-        """
-        Merge new parameter configurations into the existing ones.
-        """
-        for param in new_params:
-            if isinstance(param, dict):
-                self.merge_parameter(param)
-            else:
-                raise ValueError(
-                    f"Invalid parameter configuration: {param}. Must be a dictionary."
-                )
-
-    def merge_parameter(self, param: Dict[str, Any]) -> None:
-        """
-        Merge a single parameter configuration into the existing ones.
-        """
-        if default_param := self.get_param(param["name"]):
-            default_param.merge_in_dict(param)
+            param_map = {param.name: param for param in self.configurable_parameters}
+            for param in param_updates_iter:
+                name = param.get("name", None)
+                if name not in param_map:
+                    raise ValueError(
+                        f"Parameter name '{param['name']}' not found in model configuration"
+                    )
+                param_map[name] = param_map[name].merge_in_dict(param)
+            new_params = list(param_map.values())
         else:
-            raise ValueError(
-                f"Parameter name '{param['name']}' not found in model configuration"
-            )
+            new_params = self.configurable_parameters
+
+        return replace(
+            self,
+            column_map=new_column_map,
+            fit=new_fit,
+            main_effect_params=new_main_effect_params,
+            configurable_parameters=new_params,
+        )
 
 
 class BaseModel(ABC):
@@ -277,8 +257,11 @@ class BaseModel(ABC):
 
         """
         # Merge default config with provided config
-        self.config = self.get_default_config()
-        self.config.merge_in_dict(config)
+        default_config = self.get_default_config()
+        if config:
+            self.config = default_config.merge_in_dict(config)
+        else:
+            self.config = default_config
 
     @classmethod
     @abstractmethod
@@ -308,8 +291,8 @@ class BaseModel(ABC):
         to enforce that observed variable in features.
         """
         data_copy = (
-            data.rename(columns=self.config.mapping_name)
-            if self.config.mapping_name
+            data.rename(columns=self.config.column_map)
+            if self.config.column_map
             else data.copy()
         )
         features, coords = self._prepare_data(data_copy)
@@ -723,7 +706,7 @@ class ModelBetaBinomialwSetup(BaseModel):
             "setup_effects",
         ]
 
-        config.mapping_name = {}
+        config.column_map = {}
 
         return config
 

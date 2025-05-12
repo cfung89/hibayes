@@ -187,7 +187,7 @@ data_loader:
 model:
   models: # list of default models to run. See src/hibayes/model/model.py for available models.
     ModelOneName:
-      mapping_name:
+      column_map:
         score: success # optional mapping from data names to model feature names
     ModelTwoName:
       parameters:
