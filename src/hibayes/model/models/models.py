@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field, replace
 from typing import (
@@ -27,8 +29,9 @@ logger = init_logger()
 
 Features = Dict[str, float | int | jnp.ndarray | np.ndarray]
 Coords = Dict[
-    str, Dict[str, jnp.ndarray | np.ndarray]
+    str, List[Any]
 ]  # arviz information on how to map indexes to names. Here we store both the coords and the dims values
+Dims = Dict[str, List[str]]
 Method = Literal["NUTS", "HMC"]  # MCMC sampler type
 ChainMethod = Literal["parallel", "sequential", "vectorised"]
 
@@ -110,6 +113,27 @@ class PriorConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class RandomEffectConfig:
+    """Describe one random effect term (optionally with random slopes).
+    So far this makes sense to keep separate from ParameterConfig due to
+    requring information from data such as num models, num tasks, etc."""
+
+    groups: List[
+        str, ...
+    ]  # grouping columns defining the levels - this is used in _prepare_data. len(groups) == 1 for random effects, len(groups) > 1 for interaction
+    name: str
+    prior: Optional[PriorConfig] = None
+    slopes: Optional[List[str, ...]] = None  # group specific slopes
+
+    def merged(self, **updates: Any) -> "RandomEffectConfig":
+        if "name" in updates and updates["name"] != self.name:
+            raise ValueError("Cannot change name for an existing RE config.")
+        if "prior" in updates and self.prior is not None:
+            updates["prior"] = self.prior.merged(**updates.pop("prior"))  # type: ignore[arg-type]
+        return replace(self, **updates)
+
+
+@dataclass(frozen=True, slots=True)
 class ParameterConfig:
     name: str  # Name of the parameter in the model
     prior: PriorConfig | None = None  # Prior distribution for the parameter
@@ -137,6 +161,9 @@ class ModelConfig:
     configurable_parameters: Optional[List[ParameterConfig]] = field(
         default_factory=list
     )  # parameters user can adjust
+    random_effects: Optional[List[RandomEffectConfig]] = field(
+        default_factory=list
+    )  ## random effects user can adjust
 
     fit: FitConfig = field(default_factory=FitConfig)
 
@@ -152,12 +179,23 @@ class ModelConfig:
                 raise ValueError(
                     "Duplicate parameter names found in model configuration"
                 )
+            # make sure intercept & slope parameters don't collide
+            # very edge case but the error is not nice otherwise
+            re_param_names = []
+            if self.random_effects is not None:
+                for re_cfg in self.random_effects:
+                    re_param_names.append(re_cfg.name)
+                    if re_cfg.slopes:
+                        re_param_names += [f"{re_cfg.name}_{s}" for s in re_cfg.slopes]
+                overlap = set(param_names).intersection(re_param_names)
+                if overlap:
+                    raise ValueError(
+                        f"Parameter names reused by random_effects: {', '.join(overlap)}"
+                    )
 
     def parameter_to_numpyro(self, param: str) -> Dict[str, Any]:
-        """
-        Get the parameter configuration for a specific parameter.
-        """
-        if self.configurable_parameters is None:
+        """Get the parameter configuration for a specific parameter."""
+        if self.configurable_parameters is None and self.random_effects is None:
             raise ValueError("No parameters defined in model configuration")
 
         parameter = self.get_param(param)
@@ -169,33 +207,32 @@ class ModelConfig:
         raise ValueError(f"Parameter '{param}' not found in model configuration")
 
     def get_plot_params(self) -> List[str] | None:
-        """
-        Get a list of parameters to plot based on the configuration."""
+        """Get a list of parameters to plot based on the configuration."""
         return self.main_effect_params
 
     def get_params(self) -> List[str] | None:
-        """
-        Get a list of all configurable parameters in the model config."""
-        if self.configurable_parameters is None:
-            return None
-        return [param.name for param in self.configurable_parameters]
+        """Get a list of all configurable parameters in the model config."""
+        combined_params = (self.configurable_parameters or []) + (
+            self.random_effects or []
+        )
+        if not combined_params:
+            raise ValueError("No parameters defined in model configuration")
+        return [param.name for param in combined_params]
 
     def get_param(self, param: str) -> ParameterConfig | None:
-        """
-        Get a specific parameter configuration from the configurable parameters.
-        """
-        if self.configurable_parameters is None:
+        """Get a specific parameter configuration from the configurable parameters."""
+        combined_params = (self.configurable_parameters or []) + (
+            self.random_effects or []
+        )
+        if not combined_params:
             raise ValueError("No parameters defined in model configuration")
-        for parameter in self.configurable_parameters:
+        for parameter in combined_params:
             if parameter.name == param:
                 return parameter
         return None
 
     def merge_in_dict(self, config_dict: Dict[str, Any]) -> "ModelConfig":
-        """
-        Return a config with a merge of default and user specified values.
-        """
-
+        """Return a config with a merge of default and user specified values."""
         fit_updates = config_dict.get("fit", {})
         new_fit = self.fit.merged(**fit_updates)
 
@@ -204,6 +241,8 @@ class ModelConfig:
         new_main_effect_params = config_dict.get(
             "main_effect_params", self.main_effect_params
         )
+        new_random_effects = self.random_effects
+        new_params = self.configurable_parameters
 
         if "configurable_parameters" in config_dict:
             param_updates = config_dict["configurable_parameters"]
@@ -228,8 +267,30 @@ class ModelConfig:
                     )
                 param_map[name] = param_map[name].merge_in_dict(param)
             new_params = list(param_map.values())
-        else:
-            new_params = self.configurable_parameters
+
+        if "random_effects" in config_dict:
+            random_effects_updates = config_dict["random_effects"]
+            if isinstance(random_effects_updates, dict):
+                random_effects_updates_iter = [random_effects_updates]
+            elif isinstance(random_effects_updates, list):
+                if not all(isinstance(param, dict) for param in random_effects_updates):
+                    raise ValueError(
+                        "To update parameters you need to specify either a list of dicts or a single dict where for each parameter at least the parameter name and what you would like to change is detailed."
+                    )
+                random_effects_updates_iter = random_effects_updates
+            else:
+                raise ValueError(
+                    "To update parameters you need to specify either a list of dicts or a single dict where for each parameter at least the parameter name and what you would like to change is detailed."
+                )
+            random_effect_map = {param.name: param for param in self.random_effects}
+            for param in random_effects_updates_iter:
+                name = param.get("name", None)
+                if name not in random_effect_map:
+                    raise ValueError(
+                        f"Parameter name '{param['name']}' not found in model configuration"
+                    )
+                random_effect_map[name] = random_effect_map[name].merged(**param)
+            new_random_effects = list(random_effect_map.values())
 
         return replace(
             self,
@@ -237,6 +298,7 @@ class ModelConfig:
             fit=new_fit,
             main_effect_params=new_main_effect_params,
             configurable_parameters=new_params,
+            random_effects=new_random_effects,
         )
 
 
@@ -258,8 +320,10 @@ class BaseModel(ABC):
         """
         # Merge default config with provided config
         default_config = self.get_default_config()
-        if config:
+        if isinstance(config, dict):
             self.config = default_config.merge_in_dict(config)
+        elif isinstance(config, ModelConfig):
+            self.config = config
         else:
             self.config = default_config
 
@@ -285,7 +349,7 @@ class BaseModel(ABC):
 
         return model
 
-    def prepare_data(self, data: pd.DataFrame) -> Tuple[Features, Coords]:
+    def prepare_data(self, data: pd.DataFrame) -> Tuple[Features, Coords, Dims]:
         """
         Prepare data for modeling. Wraps the abstract method _prepare_data so
         to enforce that observed variable in features.
@@ -295,16 +359,16 @@ class BaseModel(ABC):
             if self.config.column_map
             else data.copy()
         )
-        features, coords = self._prepare_data(data_copy)
+        features, coords, dims = self._prepare_data(data_copy)
 
         if "obs" not in features:
             raise ValueError(
                 "The model must have an observation feature named 'obs' in the configuration."
             )
-        return features, coords
+        return features, coords, dims
 
     @abstractmethod
-    def _prepare_data(self, data: pd.DataFrame) -> Tuple[Features, Coords]:
+    def _prepare_data(self, data: pd.DataFrame) -> Tuple[Features, Coords, Dims]:
         """
         Abstract method for preparing data. This should be implemented in subclasses.
         """
@@ -317,176 +381,89 @@ class BaseModel(ABC):
         """
         return cls.__name__
 
+    def sample_param(self, name: str) -> jnp.ndarray:
+        return numpyro.sample(**self.config.parameter_to_numpyro(name))
 
-class ModelBetaBinomial(BaseModel):
-    def _prepare_data(self, data: pd.DataFrame):
-        # Aggregate if has not been done already
-        # get nb total scores and nb correct scores
-        if "n_correct" not in data.columns:
-            data = (
-                data.groupby(["model", "task"])
-                .agg(n_correct=("score", "sum"), n_total=("score", "count"))
-                .reset_index()
+    def sample_plate(
+        self,
+        *,
+        plate_name: str,
+        size: int,
+        param_name: str,
+        index: Optional[jnp.ndarray] = None,
+    ) -> jnp.ndarray:
+        """
+        Helper function for a simple plate
+        """
+        with numpyro.plate(plate_name, size):
+            vals = self.sample_param(param_name)
+
+        return vals[index] if index is not None else vals
+
+    def linear_component(self, **features) -> jnp.ndarray:
+        """
+        Build the linear component of the model. This seems to be a common pattern
+        across models. If we are finding many people are overriding this we should
+        move to subclass.
+        """
+        linear = self.sample_param("overall_mean")
+
+        # loop over random effects
+        for re_cfg in self.config.random_effects:
+            size = features[f"num_{re_cfg.name}"]
+            index = features[f"{re_cfg.name}_index"]
+
+            # intercept
+            re_int = self.sample_plate(
+                plate_name=f"{re_cfg.name}_plate",
+                size=size,
+                param_name=re_cfg.name,
+                index=index,
             )
+            linear = linear + re_int
 
-        # map categorical levels to integer codes
-        model_index = data["model"].astype("category").cat.codes
-        task_index = data["task"].astype("category").cat.codes
+            # slopes if any
+            if re_cfg.slopes:
+                for pred in re_cfg.slopes:
+                    slope_name = f"{re_cfg.name}_{pred}"
+                    slope_draw = self.sample_plate(
+                        plate_name=f"{slope_name}_plate",
+                        size=size,
+                        param_name=slope_name,
+                        index=index,
+                    )
+                    linear = linear + slope_draw * features[pred]
+        return linear
 
-        model_names = data["model"].astype("category").cat.categories
-        task_names = data["task"].astype("category").cat.categories
 
-        features = {
-            "model_index": jnp.array(model_index),
-            "task_index": jnp.array(task_index),
-            "num_models": int(data["model"].nunique()),
-            "num_tasks": int(data["task"].nunique()),
-            "total_count": jnp.array(data["n_total"].values),
-            "obs": jnp.array(
-                data["n_correct"].values / data["n_total"].values
-            ),  # Proportions
-        }
+class BetaBinomial(BaseModel):
+    """flexible BetaBinomial GLM with random effects
 
-        coords = {
-            "coords": {
-                "model": model_names,
-                "task": task_names,
-            },
-            "dims": {
-                "model_effects": ["model"],
-                "task_effects": ["task"],
-            },
-        }
-        return features, coords
+    The class is generic. The set of random effects is defined in the config. The default config models 2 random effects with no interaction.
+    """
 
     @classmethod
-    def get_default_config(cls):
-        config = super().get_default_config()
-        # config = ModelConfig()
+    def get_default_config(cls) -> ModelConfig:
+        re_1 = RandomEffectConfig(
+            groups=["model"],
+            name="model_effects",
+            prior=PriorConfig(
+                distribution=dist.Normal,
+                distribution_args={"loc": 0.0, "scale": 0.3},
+            ),
+        )
+        re_2 = RandomEffectConfig(
+            groups=["task"],
+            name="task_effects",
+            prior=PriorConfig(
+                distribution=dist.Normal,
+                distribution_args={"loc": 0.0, "scale": 0.3},
+            ),
+        )
 
-        config.configurable_parameters = [
+        params = [
             ParameterConfig(
                 name="overall_mean",
-                prior=PriorConfig(
-                    distribution=dist.Normal,
-                    distribution_args={"loc": 0.0, "scale": 0.3},
-                ),
-            ),
-        ]
-
-        config.main_effect_params = [
-            "overall_mean",
-            "model_effects",
-        ]
-
-        return config
-
-    def build_model(self) -> Callable[..., Any]:
-        def model(
-            num_models: int,
-            num_tasks: int,
-            total_count: jnp.ndarray,
-            model_index: jnp.ndarray,
-            task_index: jnp.ndarray,
-            obs=None,  # proportion of successes
-        ):
-            # ------------------ Global intercept -----------------------
-            # overall_mean = numpyro.sample("overall_mean", dist.Normal(0, 0.3))
-            overall_mean = numpyro.sample(
-                **self.config.parameter_to_numpyro("overall_mean")
-            )
-
-            # ------------------ Task‑level random effects ------------
-
-            # Separate parameter for each task
-            with numpyro.plate("task_plate", num_tasks):
-                task_effects = numpyro.sample("task_effects", dist.Normal(0, 0.3))
-
-            # ------------------ Model‑level random effects -------------
-
-            # Separate parameter for each model
-            with numpyro.plate("model_plate", num_models):
-                model_effects = numpyro.sample("model_effects", dist.Normal(0, 0.3))
-
-            # For each observation compute the logit and the success probability
-            # (instead of for loop do it with numpyro.plate)
-            data_size = len(model_index)
-            with numpyro.plate("data", data_size):
-                # ---------------- Probability of success ---------------------
-                # Calculate log-odds
-                logits = numpyro.deterministic(
-                    "logits",
-                    overall_mean
-                    + task_effects[task_index]
-                    + model_effects[model_index],
-                )
-
-                # Convert to average probability
-                avg_success_prob = numpyro.deterministic(
-                    "avg_success_prob", jax.nn.sigmoid(logits)
-                )
-
-                # Overdispersion parameter (controls how much probabilities vary)
-                dispersion_phi = numpyro.sample("dispersion_phi", dist.Gamma(1.0, 0.1))
-
-                # Calculate alpha and beta for Beta distribution
-                beta_alpha = avg_success_prob * dispersion_phi
-                beta_beta = (1 - avg_success_prob) * dispersion_phi
-
-                # Sample success probabilities from a Beta
-                success_prob = numpyro.sample(
-                    "success_prob", dist.Beta(beta_alpha, beta_beta)
-                )
-
-                # Sample observations (n_correct)
-                if obs is not None:
-                    # Convert proportions to counts
-                    count_obs = jnp.round(obs * total_count).astype(jnp.int32)
-
-                    # Run binomial on observed data
-                    numpyro.sample(
-                        "n_correct",
-                        dist.Binomial(total_count, success_prob),
-                        obs=count_obs,
-                    )
-
-                    # Observed is the proportion
-                    numpyro.deterministic("obs", obs)
-
-                # If no observations are provided, sample from the model (prior predictive)
-                else:
-                    # Generate count predictions
-                    count_pred = numpyro.sample(
-                        "n_correct", dist.Binomial(total_count, success_prob)
-                    )
-                    # Convert counts to proportions
-                    numpyro.deterministic("obs", count_pred / total_count)
-
-        return model
-
-
-class TwoRandomEffectsBetaBinomial(BaseModel):
-    @classmethod
-    def get_default_config(cls):
-        config = super().get_default_config()
-
-        config.configurable_parameters = [
-            ParameterConfig(
-                name="overall_mean",
-                prior=PriorConfig(
-                    distribution=dist.Normal,
-                    distribution_args={"loc": 0.0, "scale": 0.3},
-                ),
-            ),
-            ParameterConfig(
-                name="random_1_effects",
-                prior=PriorConfig(
-                    distribution=dist.Normal,
-                    distribution_args={"loc": 0.0, "scale": 0.3},
-                ),
-            ),
-            ParameterConfig(
-                name="random_2_effects",
                 prior=PriorConfig(
                     distribution=dist.Normal,
                     distribution_args={"loc": 0.0, "scale": 0.3},
@@ -501,196 +478,131 @@ class TwoRandomEffectsBetaBinomial(BaseModel):
             ),
         ]
 
-        config.main_effect_params = [
-            "overall_mean",
-            "random_1_effects",
-        ]
+        return ModelConfig(
+            configurable_parameters=params,
+            random_effects=[re_1, re_2],
+            main_effect_params=["overall_mean", "model_effects", "success_prob"],
+        )
 
-        return config
+    def _prepare_data(self, data: pd.DataFrame) -> Tuple[Features, Coords, Dims]:
+        if self.config.random_effects is None:
+            raise ValueError("No random effects defined in the model configuration.")
 
-    def _prepare_data(self, data: pd.DataFrame):
-        # Aggregate if has not been done already
-        # get nb total scores and nb correct scores
+        # TODO: Magda to check this assumption.
+        # collect all grouping columns that appear in any RE
+        # each RE should contain only one value per linear predictor.
+        random_effect_cols = {g for re in self.config.random_effects for g in re.groups}
+
+        # for values for slopes should also not vary within groups
+        needed_predictors = {
+            s for re in self.config.random_effects if re.slopes for s in re.slopes
+        }
+
+        random_effect_cols |= needed_predictors
+
         if "n_correct" not in data.columns:
+            group_cols = sorted(random_effect_cols)
             data = (
-                data.groupby(["random_1", "random_2"])
-                .agg(n_correct=("score", "sum"), n_total=("score", "count"))
+                data.groupby(group_cols, observed=True)
+                .agg(
+                    n_correct=("score", "sum"),
+                    n_total=("score", "count"),
+                )
                 .reset_index()
             )
 
-        # map categorical levels to integer codes
-        random_1_index = data["random_1"].astype("category").cat.codes
-        random_2_index = data["random_2"].astype("category").cat.codes
-
-        random_1_names = data["random_1"].astype("category").cat.categories
-        random_2_names = data["random_2"].astype("category").cat.categories
-
-        features = {
-            "random_1_index": jnp.array(random_1_index),
-            "random_2_index": jnp.array(random_2_index),
-            "num_random_1": int(data["random_1"].nunique()),
-            "num_random_2": int(data["random_2"].nunique()),
-            "total_count": jnp.array(data["n_total"].values),
-            "obs": jnp.array(
-                data["n_correct"].values / data["n_total"].values
-            ),  # Proportions
+        features: Features = {
+            "total_count": jnp.asarray(data["n_total"].values, dtype=jnp.int32),
+            "obs": jnp.asarray(
+                data["n_correct"].values / data["n_total"].values, dtype=jnp.float32
+            ),
         }
+        coords: Coords = {}
+        dims: Dims = {}
 
-        coords = {
-            "coords": {
-                "random_1": random_1_names,
-                "random_2": random_2_names,
-            },
-            "dims": {
-                "random_1_effects": ["random_1"],
-                "random_2_effects": ["random_2"],
-            },
-        }
-        return features, coords
-
-    def build_model(self) -> Callable[..., Any]:
-        def model(
-            num_random_1: int,
-            num_random_2: int,
-            total_count: jnp.ndarray,
-            random_1_index: jnp.ndarray,
-            random_2_index: jnp.ndarray,
-            obs=None,  # proportion of successes
-        ):
-            # ------------------ Global intercept -----------------------
-            # overall_mean = numpyro.sample("overall_mean", dist.Normal(0, 0.3))
-            overall_mean = numpyro.sample(
-                **self.config.parameter_to_numpyro("overall_mean")
-            )
-
-            # ------------------ Task‑level random effects ------------
-
-            # Separate parameter for each task
-            with numpyro.plate("random_2_plate", num_random_2):
-                random_2_effects = numpyro.sample(
-                    **self.config.parameter_to_numpyro("random_2_effects")
+        for col in needed_predictors:
+            # for now only support continuous predictors. TODO add support for categorical and
+            # ordered categorical
+            if pd.api.types.is_categorical_dtype(data[col]):
+                raise NotImplementedError(
+                    f"Categorical predictors are not supported yet. Please convert {col} to a continuous type or define your own custom model."
                 )
+            features[col] = jnp.asarray(data[col].values, dtype=jnp.float32)
 
-            # ------------------ Model‑level random effects -------------
+        for re_cfg in self.config.random_effects:
+            key_name = "_x_".join(re_cfg.groups)  # note just the name if only one group
+            codes, cats = pd.factorize(
+                tuple(zip(*(data[g] for g in re_cfg.groups))), sort=True
+            )  # we can assume our groups are categorical.
+            # should we unpack if only one in group to get rid of ugly tuple?
 
-            # Separate parameter for each model
-            with numpyro.plate("random_1_plate", num_random_1):
-                random_1_effects = numpyro.sample(
-                    **self.config.parameter_to_numpyro("random_1_effects")
+            idx_name = f"{re_cfg.name}_index"
+            size_name = f"num_{re_cfg.name}"
+
+            features[idx_name] = jnp.asarray(codes, dtype=jnp.int32)
+            features[size_name] = len(cats)
+
+            coords[key_name] = cats.tolist()
+            dims[re_cfg.name] = [key_name]
+            if re_cfg.slopes:
+                for s in re_cfg.slopes:
+                    dims[f"{re_cfg.name}_{s}"] = [key_name]
+
+        return features, coords, dims
+
+    def build_model(self):
+        def model(**features):
+            linear = self.linear_component(**features)
+            # likelihood
+            p_bar = numpyro.deterministic("p_bar", jax.nn.sigmoid(linear))
+
+            phi = self.sample_param("dispersion_phi")
+            alpha = p_bar * phi
+            beta = (1.0 - p_bar) * phi
+
+            success_prob = numpyro.sample("success_prob", dist.Beta(alpha, beta))
+
+            n_tot = features["total_count"]
+            if features["obs"] is not None:
+                obs_cnt = jnp.round(features["obs"] * n_tot).astype(jnp.int32)
+
+                numpyro.sample(
+                    "n_correct",
+                    dist.Binomial(n_tot, success_prob),
+                    obs=obs_cnt,
                 )
-
-            # For each observation compute the logit and the success probability
-            # (instead of for loop do it with numpyro.plate)
-            data_size = len(random_1_index)
-            with numpyro.plate("data", data_size):
-                # ---------------- Probability of success ---------------------
-                # Calculate log-odds
-                logits = numpyro.deterministic(
-                    "logits",
-                    overall_mean
-                    + random_2_effects[random_2_index]
-                    + random_1_effects[random_1_index],
+            else:
+                count_pred = numpyro.sample(
+                    "n_correct",
+                    dist.Binomial(n_tot, success_prob),
                 )
-
-                # Convert to average probability
-                avg_success_prob = numpyro.deterministic(
-                    "avg_success_prob", jax.nn.sigmoid(logits)
-                )
-
-                # Overdispersion parameter (controls how much probabilities vary)
-                dispersion_phi = numpyro.sample(
-                    **self.config.parameter_to_numpyro("dispersion_phi")
-                )
-
-                # Calculate alpha and beta for Beta distribution
-                beta_alpha = avg_success_prob * dispersion_phi
-                beta_beta = (1 - avg_success_prob) * dispersion_phi
-
-                # Sample success probabilities from a Beta
-                success_prob = numpyro.sample(
-                    "success_prob", dist.Beta(beta_alpha, beta_beta)
-                )
-
-                # Sample observations (n_correct)
-                if obs is not None:
-                    # Convert proportions to counts
-                    count_obs = jnp.round(obs * total_count).astype(jnp.int32)
-
-                    # Run binomial on observed data
-                    numpyro.sample(
-                        "n_correct",
-                        dist.Binomial(total_count, success_prob),
-                        obs=count_obs,
-                    )
-
-                    # Observed is the proportion
-                    numpyro.deterministic("obs", obs)
-
-                # If no observations are provided, sample from the model (prior predictive)
-                else:
-                    # Generate count predictions
-                    count_pred = numpyro.sample(
-                        "n_correct", dist.Binomial(total_count, success_prob)
-                    )
-                    # Convert counts to proportions
-                    numpyro.deterministic("obs", count_pred / total_count)
+                # we like to plot proportions
+                numpyro.deterministic("obs", count_pred / n_tot)
 
         return model
 
 
-class ModelBetaBinomialwSetup(BaseModel):
-    def _prepare_data(self, data: pd.DataFrame):
-        # Aggregate if has not been done already
-        # get nb total scores and nb correct scores
-        if "n_correct" not in data.columns:
-            data = (
-                data.groupby(["model", "task", "setup"])
-                .agg(n_correct=("score", "sum"), n_total=("score", "count"))
-                .reset_index()
-            )
-
-        # map categorical levels to integer codes
-        model_index = data["model"].astype("category").cat.codes
-        task_index = data["task"].astype("category").cat.codes
-        setup_index = data["setup"].astype("category").cat.codes
-
-        model_names = data["model"].astype("category").cat.categories
-        task_names = data["task"].astype("category").cat.categories
-        setup_names = data["setup"].astype("category").cat.categories
-
-        features = {
-            "model_index": jnp.array(model_index),
-            "task_index": jnp.array(task_index),
-            "setup_index": jnp.array(setup_index),
-            "num_models": int(data["model"].nunique()),
-            "num_tasks": int(data["task"].nunique()),
-            "num_setups": int(data["setup"].nunique()),
-            "total_count": jnp.array(data["n_total"].values),
-            "obs": jnp.array(
-                data["n_correct"].values / data["n_total"].values
-            ),  # Proportions
-        }
-
-        coords = {
-            "coords": {
-                "model": model_names,
-                "task": task_names,
-                "setup": setup_names,
-            },
-            "dims": {
-                "model_effects": ["model"],
-                "task_effects": ["task"],
-                "setup_effects": ["setup"],
-            },
-        }
-        return features, coords
-
+class Binomial(BetaBinomial):
     @classmethod
-    def get_default_config(cls):
-        config = super().get_default_config()
-        # config = ModelConfig()
+    def get_default_config(cls) -> ModelConfig:
+        re_1 = RandomEffectConfig(
+            groups=["model"],
+            name="model_effects",
+            prior=PriorConfig(
+                distribution=dist.Normal,
+                distribution_args={"loc": 0.0, "scale": 0.3},
+            ),
+        )
+        re_2 = RandomEffectConfig(
+            groups=["task"],
+            name="task_effects",
+            prior=PriorConfig(
+                distribution=dist.Normal,
+                distribution_args={"loc": 0.0, "scale": 0.3},
+            ),
+        )
 
-        config.configurable_parameters = [
+        params = [
             ParameterConfig(
                 name="overall_mean",
                 prior=PriorConfig(
@@ -700,238 +612,36 @@ class ModelBetaBinomialwSetup(BaseModel):
             ),
         ]
 
-        config.main_effect_params = [
-            "overall_mean",
-            "model_effects",
-            "setup_effects",
-        ]
+        return ModelConfig(
+            configurable_parameters=params,
+            random_effects=[re_1, re_2],
+            main_effect_params=["overall_mean", "model_effects", "success_prob"],
+        )
 
-        config.column_map = {}
+    # same prep data as BetaBinomial
 
-        return config
+    def build_model(self):
+        def model(**features):
+            linear = self.linear_component(**features)
 
-    def build_model(self) -> Callable[..., Any]:
-        def model(
-            num_models: int,
-            num_tasks: int,
-            num_setups: int,
-            total_count: jnp.ndarray,
-            model_index: jnp.ndarray,
-            task_index: jnp.ndarray,
-            setup_index: jnp.ndarray,
-            obs=None,  # proportion of successes
-        ):
-            # ------------------ Global intercept -----------------------
-            # overall_mean = numpyro.sample("overall_mean", dist.Normal(0, 0.3))
-            overall_mean = numpyro.sample(
-                **self.config.parameter_to_numpyro("overall_mean")
-            )
+            # likelihood
+            success_prob = numpyro.deterministic("success_prob", jax.nn.sigmoid(linear))
 
-            # ------------------ Task‑level random effects ------------
+            n_tot = features["total_count"]
+            if features["obs"] is not None:
+                obs_cnt = jnp.round(features["obs"] * n_tot).astype(jnp.int32)
 
-            # Separate parameter for each task
-            with numpyro.plate("task_plate", num_tasks):
-                task_effects = numpyro.sample("task_effects", dist.Normal(0, 0.3))
-
-            # ------------------ Model‑level random effects -------------
-
-            # Separate parameter for each model
-            with numpyro.plate("model_plate", num_models):
-                model_effects = numpyro.sample("model_effects", dist.Normal(0, 0.3))
-
-            # ------------------ Setup‑level random effects -------------
-
-            # Separate parameter for each model
-            with numpyro.plate("setup_plate", num_setups):
-                setup_effects = numpyro.sample("setup_effects", dist.Normal(0, 0.3))
-
-            data_size = len(model_index)
-            with numpyro.plate("data", data_size):
-                # ---------------- Probability of success ---------------------
-
-                # Calculate log-odds
-                logits = numpyro.deterministic(
-                    "logits",
-                    overall_mean
-                    + task_effects[task_index]
-                    + model_effects[model_index]
-                    + setup_effects[setup_index],
+                numpyro.sample(
+                    "n_correct",
+                    dist.Binomial(n_tot, success_prob),
+                    obs=obs_cnt,
                 )
-
-                # Convert to average probability
-                avg_success_prob = numpyro.deterministic(
-                    "avg_success_prob", jax.nn.sigmoid(logits)
+            else:
+                count_pred = numpyro.sample(
+                    "n_correct",
+                    dist.Binomial(n_tot, success_prob),
                 )
-
-                # Overdispersion parameter (controls how much probabilities vary)
-                dispersion_phi = numpyro.sample("dispersion_phi", dist.Gamma(1.0, 0.1))
-
-                # Calculate alpha and beta for Beta distribution
-                beta_alpha = avg_success_prob * dispersion_phi
-                beta_beta = (1 - avg_success_prob) * dispersion_phi
-
-                # Sample success probabilities from a Beta
-                success_prob = numpyro.sample(
-                    "success_prob", dist.Beta(beta_alpha, beta_beta)
-                )
-
-                # Sample observations (n_correct)
-                if obs is not None:
-                    # Convert proportions to counts
-                    count_obs = jnp.round(obs * total_count).astype(jnp.int32)
-
-                    # Run binomial on observed data
-                    numpyro.sample(
-                        "n_correct",
-                        dist.Binomial(total_count, success_prob),
-                        obs=count_obs,
-                    )
-
-                    # Observed is the proportion
-                    numpyro.deterministic("obs", obs)
-
-                # If no observations are provided, sample from the model (prior predictive)
-                else:
-                    # Generate count predictions
-                    count_pred = numpyro.sample(
-                        "n_correct", dist.Binomial(total_count, success_prob)
-                    )
-                    # Convert counts to proportions
-                    numpyro.deterministic("obs", count_pred / total_count)
-
-        return model
-
-
-class ModelBinomial(BaseModel):
-    def _prepare_data(self, data: pd.DataFrame):
-        # Aggregate if has not been done already
-        if "n_correct" not in data.columns:
-            data = (
-                data.groupby(["model", "task"])
-                .agg(n_correct=("score", "sum"), n_total=("score", "count"))
-                .reset_index()
-            )  #
-
-        # map categorical levels to integer codes
-        model_index = data["model"].astype("category").cat.codes
-        task_index = data["task"].astype("category").cat.codes
-
-        model_names = data["model"].astype("category").cat.categories
-        task_names = data["task"].astype("category").cat.categories
-
-        features = {
-            "model_index": jnp.array(model_index),
-            "task_index": jnp.array(task_index),
-            "num_models": int(data["model"].nunique()),
-            "num_tasks": int(data["task"].nunique()),
-            "total_count": jnp.array(data["n_total"].values),
-            "obs": jnp.array(
-                data["n_correct"].values / data["n_total"].values
-            ),  # Proportions
-        }
-
-        coords = {
-            "coords": {
-                "model": model_names,
-                "task": task_names,
-            },
-            "dims": {
-                "model_effects": ["model"],
-                "task_effects": ["task"],
-            },
-        }
-        return features, coords
-
-    @classmethod
-    def get_default_config(cls):
-        config = super().get_default_config()
-        # config = ModelConfig()
-
-        config.configurable_parameters = [
-            ParameterConfig(
-                name="overall_mean",
-                prior=PriorConfig(
-                    distribution=dist.Normal,
-                    distribution_args={"loc": 0.0, "scale": 0.3},
-                ),
-            ),
-        ]
-
-        config.main_effect_params = [
-            "overall_mean",
-            "model_effects",
-        ]
-
-        return config
-
-    def build_model(self) -> Callable[..., Any]:
-        def model(
-            num_models: int,
-            num_tasks: int,
-            total_count: jnp.ndarray,
-            model_index: jnp.ndarray,
-            task_index: jnp.ndarray,
-            obs=None,  # proportion of successes
-        ):
-            # ------------------ Global intercept -----------------------
-            # overall_mean = numpyro.sample("overall_mean", dist.Normal(0, 0.3))
-            overall_mean = numpyro.sample(
-                **self.config.parameter_to_numpyro("overall_mean")
-            )
-
-            # ------------------ Task‑level random effects ------------
-
-            # Separate parameter for each task
-            with numpyro.plate("task_plate", num_tasks):
-                task_effects = numpyro.sample("task_effects", dist.Normal(0, 0.3))
-
-            # ------------------ Model‑level random effects -------------
-
-            # Separate parameter for each model
-            with numpyro.plate("model_plate", num_models):
-                model_effects = numpyro.sample("model_effects", dist.Normal(0, 0.3))
-
-            # For each observation compute the logit and the success probability
-            # (instead of for loop do it with numpyro.plate)
-            data_size = len(model_index)
-            with numpyro.plate("data", data_size):
-                # ---------------- Probability of success ---------------------
-
-                # Calculate log-odds
-                logits = numpyro.deterministic(
-                    "logits",
-                    overall_mean
-                    + task_effects[task_index]
-                    + model_effects[model_index],
-                )
-
-                # Sample success probabilities from a Beta
-                success_prob = numpyro.deterministic(
-                    "success_prob", jax.nn.sigmoid(logits)
-                )
-
-                # Sample observations (n_correct)
-                if obs is not None:
-                    # Convert proportions to counts
-                    count_obs = jnp.round(obs * total_count).astype(jnp.int32)
-
-                    # Run binomial on observed data
-                    numpyro.sample(
-                        "n_correct",
-                        dist.Binomial(total_count, success_prob),
-                        obs=count_obs,
-                    )
-
-                    # Observed is the proportion
-                    numpyro.deterministic("obs", obs)
-
-                # If no observations are provided, sample from the model (prior predictive)
-                else:
-                    # Generate count predictions
-                    count_pred = numpyro.sample(
-                        "n_correct", dist.Binomial(total_count, success_prob)
-                    )
-                    # Convert counts to proportions
-                    numpyro.deterministic("obs", count_pred / total_count)
+                # we like to plot proportions
+                numpyro.deterministic("obs", count_pred / n_tot)
 
         return model

@@ -62,7 +62,8 @@ def fit(model_analysis_state: ModelAnalysisState, display: ModellingDisplay) -> 
 
     idata: az.InferenceData = az.from_numpyro(
         mcmc,
-        **model_analysis_state.coords,
+        coords=model_analysis_state.coords,
+        dims=model_analysis_state.dims,
     )
     idata.extend(
         model_analysis_state.inference_data, join="right"

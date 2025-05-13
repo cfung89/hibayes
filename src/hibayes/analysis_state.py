@@ -1,9 +1,11 @@
+from __future__ import annotations
+
 import json
 import os
 import pickle
 from dataclasses import asdict, is_dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Tuple
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import pandas as pd
@@ -12,7 +14,7 @@ from arviz import InferenceData
 from .utils import init_logger
 
 if TYPE_CHECKING:
-    from .model.models import BaseModel, ModelConfig
+    from .model.models import BaseModel, Coords, Dims, Features, ModelConfig
 
 logger = init_logger()
 
@@ -40,18 +42,26 @@ class ModelAnalysisState:
         self,
         model_name: str,  # name of the statistical model
         model_builder: "BaseModel",  # statistical model builder
-        features: Dict[str, Any],  # extracted features for the model
-        coords: Dict[str, dict]
-        | None = None,  # optional look up table for communcating information later e.g. model[3] -> o3
-        inference_data: InferenceData
-        | None = None,  # inference data re the statistical model fit
-        diagnostics: Dict[str, Any] | None = None,  # outcomes of the checkers e.g. rhat
+        features: "Features",  # extracted features for the model
+        coords: Optional[
+            "Coords"
+        ] = None,  # map dimensinos to coordinates - used for nice plotting vars
+        dims: Optional[
+            "Dims"
+        ] = None,  # variable names to coordinates - used for nice plotting vars
+        inference_data: Optional[
+            InferenceData
+        ] = None,  # inference data re the statistical model fit
+        diagnostics: Optional[
+            Dict[str, Any]
+        ] = None,  # outcomes of the checkers e.g. rhat
         is_fitted: bool = False,
     ) -> None:
         self._model_name: str = model_name
         self._model_builder: "BaseModel" = model_builder
-        self._features: Dict[str, Any] = features
-        self._coords: Dict[str, list] | None = coords
+        self._features: "Features" = features
+        self._coords: "Coords" | None = coords
+        self._dims: "Dims" | None = None
         self._inference_data: InferenceData = (
             inference_data
             if inference_data
@@ -95,18 +105,12 @@ class ModelAnalysisState:
         """Get the prior features. Bascally all bar observables."""
         return {k: v for k, v in self._features.items() if "obs" not in k}
 
-    @property
     def feature(self, feature_name: str) -> Any:
         """Get a specific feature."""
-        return self._features[feature_name]
-
-    @features.setter
-    def features(self, features: Dict[str, Any]) -> None:
-        """Set the features."""
-        self._features = features
+        return self._features.get(feature_name, None)
 
     @property
-    def coords(self) -> Dict[str, list] | None:
+    def coords(self) -> "Coords" | None:
         """Get the coordinates."""
         return self._coords
 
@@ -114,10 +118,14 @@ class ModelAnalysisState:
         """Get a specific coordinate."""
         return self._coords[coord_name] if self._coords else None
 
-    @coords.setter
-    def coords(self, coords: Dict[str, list]) -> None:
-        """Set the coordinates."""
-        self._coords = coords
+    @property
+    def dims(self) -> "Dims" | None:
+        """Get the dimensions."""
+        return self._dims
+
+    def dim(self, dim_name: str) -> list | None:
+        """Get a specific dimension."""
+        return self._dims[dim_name] if self._dims else None
 
     @property
     def inference_data(self) -> InferenceData | None:
@@ -143,11 +151,6 @@ class ModelAnalysisState:
     def diagnostic(self, var: str) -> Any:
         """Get a specific result."""
         return self._diagnostics.get(var, None)
-
-    @inference_data.setter
-    def inference_data(self, inference_data: InferenceData) -> None:
-        """Set the inference_data."""
-        self._inference_data = inference_data
 
     @property
     def is_fitted(self) -> bool:
@@ -194,6 +197,9 @@ class ModelAnalysisState:
         if self.coords is not None:
             _dump_json(self.coords, path / "coords.json")
 
+        if self.dims is not None:
+            _dump_json(self.dims, path / "dims.json")
+
         if self.diagnostics:
             _dump_json(self.diagnostics, path / "diagnostics.json")
             # if any figures save them as pngs:
@@ -231,10 +237,13 @@ class ModelAnalysisState:
             model_builder: "BaseModel" = pickle.load(fp)
 
         # Features coords and diagnostics
-        features: Dict[str, Any] = _load_json(path / "features.json")
+        features: "Features" = _load_json(path / "features.json")
         coords = None
         if (path / "coords.json").exists():
-            coords = _load_json(path / "coords.json")
+            coords: "Coords" = _load_json(path / "coords.json")
+        dims = None
+        if (path / "dims.json").exists():
+            dims: "Dims" = _load_json(path / "dims.json")
         diagnostics = None
         if (path / "diagnostics.json").exists():
             diagnostics = _load_json(path / "diagnostics.json")
@@ -248,6 +257,7 @@ class ModelAnalysisState:
             model_builder=model_builder,
             features=features,
             coords=coords,
+            dims=dims,
             inference_data=inference_data,
             diagnostics=diagnostics,
             is_fitted=is_fitted,

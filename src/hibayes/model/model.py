@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 from typing import (
     Any,
@@ -18,8 +20,8 @@ from hibayes.utils import init_logger
 from ..analysis_state import ModelAnalysisState
 from .models import (
     BaseModel,
-    ModelBetaBinomial,
-    ModelBinomial,
+    BetaBinomial,
+    Binomial,
     ModelConfig,
 )
 
@@ -30,10 +32,10 @@ logger = init_logger()
 class ModelsToRunConfig:
     """Configuration for the models to be run in the analysis."""
 
-    DEFAULT_MODELS: ClassVar[List[str]] = ["ModelBetaBinomial"]
+    DEFAULT_MODELS: ClassVar[List[str]] = ["BetaBinomial"]
     AVAILABLE_MODELS: ClassVar[Dict[str, Type[BaseModel]]] = {
-        "ModelBetaBinomial": ModelBetaBinomial,
-        "ModelBinomial": ModelBinomial,
+        "BetaBinomial": BetaBinomial,
+        "Binomial": Binomial,
     }
 
     # List of (model_class, model_config) tuples
@@ -202,7 +204,7 @@ class ModelsToRunConfig:
             logger.info(f"Instantiated model: {model_name}")
 
             logger.debug(f"Extracting features for model: {model_name}")
-            features, coords = model_builder.prepare_data(data)
+            features, coords, dims = model_builder.prepare_data(data)
             logger.info(f"Extracted features for model: {model_name}")
 
             yield ModelAnalysisState(
@@ -210,4 +212,5 @@ class ModelsToRunConfig:
                 model_builder=model_builder,
                 features=features,
                 coords=coords,
+                dims=dims,
             )
