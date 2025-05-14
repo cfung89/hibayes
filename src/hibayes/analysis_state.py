@@ -101,9 +101,14 @@ class ModelAnalysisState:
         return self._features
 
     @property
-    def prior_features(self) -> Dict[str, Any]:
+    def prior_features(self) -> Dict[str, Optional[Any]]:
         """Get the prior features. Bascally all bar observables."""
-        return {k: v for k, v in self._features.items() if "obs" not in k}
+        features: Dict[str, Optional[Any]] = {
+            k: v for k, v in self._features.items() if "obs" not in k
+        }
+        features["obs"] = None  # add obs as None for numpyro
+
+        return features
 
     def feature(self, feature_name: str) -> Any:
         """Get a specific feature."""
@@ -131,6 +136,11 @@ class ModelAnalysisState:
     def inference_data(self) -> InferenceData | None:
         """Get the inference_data."""
         return self._inference_data
+
+    @inference_data.setter
+    def inference_data(self, inference_data: InferenceData) -> None:
+        """Set the inference_data."""
+        self._inference_data = inference_data
 
     @property
     def diagnostics(self) -> Dict[str, Any] | None:
