@@ -21,16 +21,36 @@ data_loader:
         - LogFileNameExtractor
 model:
   models:
-    BetaBinomial:
-      column_map:
-        Success Count: n_correct
-        Total Attempts: n_total
-        Sample ID: task
-    Binomial:
-      column_map:
-        Success Count: n_correct
-        Total Attempts: n_total
-        Sample ID: task
+    - name: BetaBinomial
+      config:
+        column_map:
+          Sample ID: task
+        random_effects:
+          - name: task_effects
+            groups: ["task"]
+            prior:
+              distribution: normal
+              distribution_params:
+                loc: 0
+                scale: 0.5
+          - name: model
+            groups: ["model"]
+            prior:
+              distribution: normal
+              distribution_params:
+                loc: 0
+                scale: 0.5
+          - name: task_model_effects
+            groups: ["task", "model"]
+            prior:
+              distribution: normal
+              distribution_params:
+                loc: 0
+                scale: 0.5
+    - name: Binomial
+      config:
+        column_map:
+          Sample ID: task
 platform:
 checkers:
   checks:

@@ -61,7 +61,7 @@ class ModelAnalysisState:
         self._model_builder: "BaseModel" = model_builder
         self._features: "Features" = features
         self._coords: "Coords" | None = coords
-        self._dims: "Dims" | None = None
+        self._dims: "Dims" | None = dims
         self._inference_data: InferenceData = (
             inference_data
             if inference_data
@@ -89,6 +89,11 @@ class ModelAnalysisState:
     def model_config(self) -> "ModelConfig":
         """Get the model configuration."""
         return self._model_builder.config
+
+    @model_config.setter
+    def model_config(self, model_config: "ModelConfig") -> None:
+        """Set the model configuration."""
+        self._model_builder.config = model_config
 
     @property
     def model_builder(self) -> "BaseModel":

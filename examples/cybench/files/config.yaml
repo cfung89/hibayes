@@ -1,15 +1,17 @@
 model:
   models:
-    ModelBetaBinomial:
-      column_map:
-        Success Count: n_correct
-        Total Attempts: n_total
-        Sample ID: task
-    ModelBinomial:
-      column_map:
-        Success Count: n_correct
-        Total Attempts: n_total
-        Sample ID: task
+    - name: BetaBinomial
+      config:
+        column_map:
+          Success Count: n_correct
+          Total Attempts: n_total
+          Sample ID: task
+    - name: Binomial
+      config:
+        column_map:
+          Success Count: n_correct
+          Total Attempts: n_total
+          Sample ID: task
 platform:
 checkers:
   checks:

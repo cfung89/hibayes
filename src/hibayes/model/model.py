@@ -76,25 +76,28 @@ class ModelsToRunConfig:
 
         models_config = config.get("models", None)
 
-        # Handle different formats of model configuration
-        if isinstance(models_config, list):
-            # ["Model1", "Model2"] format
-            for model_name in models_config:
+        if not isinstance(models_config, list):
+            models_config = [models_config]
+
+        for model in models_config:
+            if isinstance(model, str):
+                # ["Model1", "Model2"] format
                 if (
-                    model_name in cls.AVAILABLE_MODELS
-                    and cls.AVAILABLE_MODELS[model_name] is not None
+                    model in cls.AVAILABLE_MODELS
+                    and cls.AVAILABLE_MODELS[model] is not None
                 ):
-                    enabled_models.append(
-                        (cls.AVAILABLE_MODELS[model_name], None)
-                    )  # notice no config so just use default model args.
+                    # Here we are passing the custom args to the model config.
+                    enabled_models.append((cls.AVAILABLE_MODELS[model], None))
                 else:
                     logger.warning(
-                        f"Model {model_name} not available or not properly defined."
+                        f"Model {model} not available or not properly defined."
                     )
 
-        elif isinstance(models_config, dict):
-            # {"Model1": {config}, "Model2": {config}} format
-            for model_name, model_config in models_config.items():
+            elif isinstance(model, dict):
+                # [{name: "Model1", **configs}] format
+                model_name = model.pop("name", None)
+                model_config = model.pop("config", None)
+
                 if (
                     model_name in cls.AVAILABLE_MODELS
                     and cls.AVAILABLE_MODELS[model_name] is not None

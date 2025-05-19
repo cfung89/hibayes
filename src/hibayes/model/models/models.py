@@ -39,7 +39,7 @@ ChainMethod = Literal["parallel", "sequential", "vectorised"]
 @dataclass(frozen=True, slots=True)
 class FitConfig:
     method: Method = "NUTS"
-    samples: int = 1000
+    samples: int = 4000
     warmup: int = 500
     chains: int = 4
     seed: int = 0
@@ -79,42 +79,28 @@ class PriorConfig:
             return self.distribution()
         return self.distribution(**self.distribution_args)
 
-    def merged(self, config_dict: Dict[str, Any]) -> "PriorConfig":
+    @classmethod
+    def from_dict(cls, config_dict: Dict[str, Any]) -> "PriorConfig":
         """
-        Merge a dictionary into the existing configuration.
+        Create a PriorConfig from a dictionary.
         """
         distribution_name = config_dict.pop("distribution", None)
         distribution_args = config_dict.pop("distribution_args", None)
-        old_distribution_args = self.distribution_args or {}
 
-        # if update to distribution
-        if (
-            distribution_name
-            and not self.DISTRIBUTION_MAP[distribution_name] == self.distribution
-        ):
-            if distribution_name not in self.DISTRIBUTION_MAP:
-                raise ValueError(
-                    f"Invalid distribution name '{distribution_name}'. Valid options are: {list(self.DISTRIBUTION_MAP.keys())}"
-                )
-            distribution_class = self.DISTRIBUTION_MAP[distribution_name]
-            config_dict["distribution"] = distribution_class
-
-            # as new distribution class we should remove the old args
-            old_distribution_args = {}
-
-        if distribution_args is not None:
-            if not isinstance(distribution_args, dict):
-                raise ValueError(
-                    "distribution_args must be a dictionary of arguments for the distribution."
-                )
-            old_distribution_args.update(distribution_args)
-        config_dict["distribution_args"] = old_distribution_args
-        return replace(self, **config_dict)
+        if distribution_name not in cls.DISTRIBUTION_MAP:
+            raise ValueError(
+                f"Invalid distribution name '{distribution_name}'. Valid options are: {list(cls.DISTRIBUTION_MAP.keys())}"
+            )
+        distribution_class = cls.DISTRIBUTION_MAP[distribution_name]
+        return cls(
+            distribution=distribution_class,
+            distribution_args=distribution_args,
+        )
 
 
 @dataclass(frozen=True, slots=True)
 class RandomEffectConfig:
-    """Describe one random effect term (optionally with random slopes).
+    """Describe one random effect term.
     So far this makes sense to keep separate from ParameterConfig due to
     requring information from data such as num models, num tasks, etc."""
 
@@ -122,21 +108,42 @@ class RandomEffectConfig:
         str, ...
     ]  # grouping columns defining the levels - this is used in _prepare_data. len(groups) == 1 for random effects, len(groups) > 1 for interaction
     name: str
-    prior: Optional[PriorConfig] = None
-    slopes: Optional[List[str, ...]] = None  # group specific slopes
+    prior: PriorConfig
+    main_effect: bool = False  # Whether this re should feature in headline analysis
 
     def merged(self, **updates: Any) -> "RandomEffectConfig":
         if "name" in updates and updates["name"] != self.name:
             raise ValueError("Cannot change name for an existing RE config.")
-        if "prior" in updates and self.prior is not None:
-            updates["prior"] = self.prior.merged(**updates.pop("prior"))  # type: ignore[arg-type]
+        if "prior" in updates:
+            updates["prior"] = self.prior.from_dict(updates.pop("prior"))
         return replace(self, **updates)
+
+    @classmethod
+    def from_dict(cls, config_dict: Dict[str, Any]) -> "RandomEffectConfig":
+        """
+        Create a RandomEffectConfig from a dictionary.
+        """
+        groups = config_dict.pop("groups", None)
+        if not isinstance(groups, list):
+            raise ValueError("You need to specify groups as a list.")
+        name = config_dict.pop("name", None)
+        if name is None:
+            raise ValueError("Missing 'name' key in random effect configuration.")
+        prior = config_dict.pop("prior", None)
+        if prior is None:
+            raise ValueError("Missing 'prior' key in random effect configuration.")
+        prior = PriorConfig.from_dict(prior)
+
+        return cls(groups=sorted(groups), name=name, prior=prior)
 
 
 @dataclass(frozen=True, slots=True)
 class ParameterConfig:
     name: str  # Name of the parameter in the model
-    prior: PriorConfig | None = None  # Prior distribution for the parameter
+    prior: PriorConfig  # Prior distribution for the parameter
+    main_effect: bool = (
+        False  # Whether this parameter should feature in headline analysis
+    )
 
     def merge_in_dict(self, config_dict: Dict[str, Any]) -> "ParameterConfig":
         new_param_name = config_dict.get("name")
@@ -145,11 +152,7 @@ class ParameterConfig:
                 f"Parameter name mismatch: '{new_param_name}' does not match '{self.name}'. You cannot update parameter names as they are called in the model."
             )
         if new_prior := config_dict.get("prior", None):
-            if not self.prior:
-                raise ValueError(
-                    "You cannot update the prior of a parameter that does not have one."
-                )
-            config_dict["prior"] = self.prior.merged(new_prior)
+            config_dict["prior"] = self.prior.from_dict(new_prior)
         return replace(self, **config_dict)
 
 
@@ -158,18 +161,20 @@ class ModelConfig:
     column_map: Optional[
         Dict[str, str]
     ] = None  # the key for mapping from data columns to any required_column names
-    configurable_parameters: Optional[List[ParameterConfig]] = field(
+    configurable_parameters: List[ParameterConfig] = field(
         default_factory=list
     )  # parameters user can adjust
-    random_effects: Optional[List[RandomEffectConfig]] = field(
+    random_effects: List[RandomEffectConfig] = field(
         default_factory=list
-    )  ## random effects user can adjust
+    )  ## random effects user can adjust, add to and remove from.
 
     fit: FitConfig = field(default_factory=FitConfig)
 
-    main_effect_params: List[
-        str
-    ] | None = None  # a list of the main effect parameters in the model which you would like to plot. If None then plot all - warning you might have thousands of parameters in the model
+    main_effect_params: Optional[List[str]] = field(
+        default_factory=list
+    )  # a list of the main effect parameters in the model which you would like to plot. If None then default to parameter config
+
+    tag: Optional[str] = None  # a tag for the model config - e.g. version 1
 
     def __post_init__(self):
         # Ensure no duplicate parameter names
@@ -179,19 +184,23 @@ class ModelConfig:
                 raise ValueError(
                     "Duplicate parameter names found in model configuration"
                 )
-            # make sure intercept & slope parameters don't collide
+            # make sure intercept  parameters don't collide
             # very edge case but the error is not nice otherwise
             re_param_names = []
             if self.random_effects is not None:
                 for re_cfg in self.random_effects:
                     re_param_names.append(re_cfg.name)
-                    if re_cfg.slopes:
-                        re_param_names += [f"{re_cfg.name}_{s}" for s in re_cfg.slopes]
                 overlap = set(param_names).intersection(re_param_names)
                 if overlap:
                     raise ValueError(
                         f"Parameter names reused by random_effects: {', '.join(overlap)}"
                     )
+
+        self.main_effect_params = (
+            [p.name for p in self.configurable_parameters if p.main_effect]
+            + [re.name for re in self.random_effects if re.main_effect]
+            + self.main_effect_params
+        )
 
     def parameter_to_numpyro(self, param: str) -> Dict[str, Any]:
         """Get the parameter configuration for a specific parameter."""
@@ -219,7 +228,7 @@ class ModelConfig:
             raise ValueError("No parameters defined in model configuration")
         return [param.name for param in combined_params]
 
-    def get_param(self, param: str) -> ParameterConfig | None:
+    def get_param(self, param: str) -> ParameterConfig | RandomEffectConfig | None:
         """Get a specific parameter configuration from the configurable parameters."""
         combined_params = (self.configurable_parameters or []) + (
             self.random_effects or []
@@ -231,8 +240,22 @@ class ModelConfig:
                 return parameter
         return None
 
+    @staticmethod
+    def _apply_delete_flag(item: Dict[str, Any]) -> bool:
+        """Return True if this dict carries _delete_: true."""
+        return bool(item.pop("_delete_", False))
+
     def merge_in_dict(self, config_dict: Dict[str, Any]) -> "ModelConfig":
-        """Return a config with a merge of default and user specified values."""
+        """
+        Return a config with a merge of default and user specified values.
+
+        the user can:
+        fit: modify
+        column_map: override
+        main_effect_params: override
+        configurable_parameters: modify - to add or delete the user should create a new class
+        random_effects: delete, modify and add
+        """
         fit_updates = config_dict.get("fit", {})
         new_fit = self.fit.merged(**fit_updates)
 
@@ -241,8 +264,9 @@ class ModelConfig:
         new_main_effect_params = config_dict.get(
             "main_effect_params", self.main_effect_params
         )
-        new_random_effects = self.random_effects
         new_params = self.configurable_parameters
+
+        new_tag = config_dict.get("tag", self.tag)
 
         if "configurable_parameters" in config_dict:
             param_updates = config_dict["configurable_parameters"]
@@ -268,29 +292,26 @@ class ModelConfig:
                 param_map[name] = param_map[name].merge_in_dict(param)
             new_params = list(param_map.values())
 
+        new_res: list[RandomEffectConfig] = self.random_effects
         if "random_effects" in config_dict:
-            random_effects_updates = config_dict["random_effects"]
-            if isinstance(random_effects_updates, dict):
-                random_effects_updates_iter = [random_effects_updates]
-            elif isinstance(random_effects_updates, list):
-                if not all(isinstance(param, dict) for param in random_effects_updates):
-                    raise ValueError(
-                        "To update parameters you need to specify either a list of dicts or a single dict where for each parameter at least the parameter name and what you would like to change is detailed."
-                    )
-                random_effects_updates_iter = random_effects_updates
-            else:
-                raise ValueError(
-                    "To update parameters you need to specify either a list of dicts or a single dict where for each parameter at least the parameter name and what you would like to change is detailed."
-                )
-            random_effect_map = {param.name: param for param in self.random_effects}
-            for param in random_effects_updates_iter:
-                name = param.get("name", None)
-                if name not in random_effect_map:
-                    raise ValueError(
-                        f"Parameter name '{param['name']}' not found in model configuration"
-                    )
-                random_effect_map[name] = random_effect_map[name].merged(**param)
-            new_random_effects = list(random_effect_map.values())
+            updates = config_dict["random_effects"]
+            updates = updates if isinstance(updates, list) else [updates]
+
+            re_map = {r.name: r for r in self.random_effects}
+            for item in updates:
+                name = item.get("name")
+                if name is None:
+                    raise ValueError("Each random-effect patch needs a name.")
+
+                if self._apply_delete_flag(item):
+                    re_map.pop(name, None)  # silently ignore if absent
+                    continue
+
+                if name in re_map:  # modify
+                    re_map[name] = re_map[name].merged(**item)
+                else:  # add new re
+                    re_map[name] = RandomEffectConfig.from_dict(item)
+            new_res = list(re_map.values())
 
         return replace(
             self,
@@ -298,7 +319,8 @@ class ModelConfig:
             fit=new_fit,
             main_effect_params=new_main_effect_params,
             configurable_parameters=new_params,
-            random_effects=new_random_effects,
+            random_effects=new_res,
+            tag=new_tag,
         )
 
 
@@ -400,41 +422,6 @@ class BaseModel(ABC):
 
         return vals[index] if index is not None else vals
 
-    def linear_component(self, **features) -> jnp.ndarray:
-        """
-        Build the linear component of the model. This seems to be a common pattern
-        across models. If we are finding many people are overriding this we should
-        move to subclass.
-        """
-        linear = self.sample_param("overall_mean")
-
-        # loop over random effects
-        for re_cfg in self.config.random_effects:
-            size = features[f"num_{re_cfg.name}"]
-            index = features[f"{re_cfg.name}_index"]
-
-            # intercept
-            re_int = self.sample_plate(
-                plate_name=f"{re_cfg.name}_plate",
-                size=size,
-                param_name=re_cfg.name,
-                index=index,
-            )
-            linear = linear + re_int
-
-            # slopes if any
-            if re_cfg.slopes:
-                for pred in re_cfg.slopes:
-                    slope_name = f"{re_cfg.name}_{pred}"
-                    slope_draw = self.sample_plate(
-                        plate_name=f"{slope_name}_plate",
-                        size=size,
-                        param_name=slope_name,
-                        index=index,
-                    )
-                    linear = linear + slope_draw * features[pred]
-        return linear
-
 
 class BetaBinomial(BaseModel):
     """flexible BetaBinomial GLM with random effects
@@ -444,15 +431,8 @@ class BetaBinomial(BaseModel):
 
     @classmethod
     def get_default_config(cls) -> ModelConfig:
+        # Binomial needs at least one random effect - otherwise just Bernoulli
         re_1 = RandomEffectConfig(
-            groups=["model"],
-            name="model_effects",
-            prior=PriorConfig(
-                distribution=dist.Normal,
-                distribution_args={"loc": 0.0, "scale": 0.3},
-            ),
-        )
-        re_2 = RandomEffectConfig(
             groups=["task"],
             name="task_effects",
             prior=PriorConfig(
@@ -480,39 +460,34 @@ class BetaBinomial(BaseModel):
 
         return ModelConfig(
             configurable_parameters=params,
-            random_effects=[re_1, re_2],
-            main_effect_params=["overall_mean", "model_effects", "success_prob"],
+            random_effects=[re_1],
+            main_effect_params=["success_prob"],
         )
 
     def _prepare_data(self, data: pd.DataFrame) -> Tuple[Features, Coords, Dims]:
-        if self.config.random_effects is None:
-            raise ValueError("No random effects defined in the model configuration.")
-
         # TODO: Magda to check this assumption.
         # collect all grouping columns that appear in any RE
         # each RE should contain only one value per linear predictor.
         random_effect_cols = {g for re in self.config.random_effects for g in re.groups}
 
-        # for values for slopes should also not vary within groups
-        needed_predictors = {
-            s for re in self.config.random_effects if re.slopes for s in re.slopes
-        }
+        group_cols = sorted(random_effect_cols)
 
-        random_effect_cols |= needed_predictors
-
-        if "n_correct" not in data.columns:
-            group_cols = sorted(random_effect_cols)
-            data = (
-                data.groupby(group_cols, observed=True)
-                .agg(
-                    n_correct=("score", "sum"),
-                    n_total=("score", "count"),
-                )
-                .reset_index()
+        if not group_cols:
+            raise ValueError(
+                "No random effect columns found in the data. For a BetaBinomial model you must have at least one variable to group by otherwise you should use Bernoulli."
             )
+        data = (
+            data.groupby(group_cols, observed=True)
+            .agg(
+                n_correct=("score", "sum"),
+                n_total=("score", "count"),
+            )
+            .reset_index()
+        )
 
         features: Features = {
             "total_count": jnp.asarray(data["n_total"].values, dtype=jnp.int32),
+            "n_correct": jnp.asarray(data["n_correct"].values, dtype=jnp.int32),
             "obs": jnp.asarray(
                 data["n_correct"].values / data["n_total"].values, dtype=jnp.float32
             ),
@@ -520,21 +495,16 @@ class BetaBinomial(BaseModel):
         coords: Coords = {}
         dims: Dims = {}
 
-        for col in needed_predictors:
-            # for now only support continuous predictors. TODO add support for categorical and
-            # ordered categorical
-            if pd.api.types.is_categorical_dtype(data[col]):
-                raise NotImplementedError(
-                    f"Categorical predictors are not supported yet. Please convert {col} to a continuous type or define your own custom model."
-                )
-            features[col] = jnp.asarray(data[col].values, dtype=jnp.float32)
-
         for re_cfg in self.config.random_effects:
             key_name = "_x_".join(re_cfg.groups)  # note just the name if only one group
-            codes, cats = pd.factorize(
-                tuple(zip(*(data[g] for g in re_cfg.groups))), sort=True
-            )  # we can assume our groups are categorical.
-            # should we unpack if only one in group to get rid of ugly tuple?
+            if len(re_cfg.groups) > 1:
+                codes, cats = pd.factorize(
+                    tuple(zip(*(data[g] for g in re_cfg.groups))), sort=True
+                )  # assume our groups are categorical.
+                cats = ["_x_".join(cat) for cat in cats]
+            else:
+                codes, cats = pd.factorize(data[re_cfg.groups[0]], sort=True)
+                cats = cats.tolist()
 
             idx_name = f"{re_cfg.name}_index"
             size_name = f"num_{re_cfg.name}"
@@ -542,13 +512,32 @@ class BetaBinomial(BaseModel):
             features[idx_name] = jnp.asarray(codes, dtype=jnp.int32)
             features[size_name] = len(cats)
 
-            coords[key_name] = cats.tolist()
+            coords[key_name] = cats
             dims[re_cfg.name] = [key_name]
-            if re_cfg.slopes:
-                for s in re_cfg.slopes:
-                    dims[f"{re_cfg.name}_{s}"] = [key_name]
 
         return features, coords, dims
+
+    def linear_component(self, **features) -> jnp.ndarray:
+        """
+        Build the linear component of the model.
+        """
+        linear = self.sample_param("overall_mean")
+
+        # loop over random effects
+        for re_cfg in self.config.random_effects:
+            size = features[f"num_{re_cfg.name}"]
+            index = features[f"{re_cfg.name}_index"]
+
+            # intercept
+            re_int = self.sample_plate(
+                plate_name=f"{re_cfg.name}_plate",
+                size=size,
+                param_name=re_cfg.name,
+                index=index,
+            )
+            linear = linear + re_int
+
+        return linear
 
     def build_model(self):
         def model(**features):
@@ -585,23 +574,6 @@ class BetaBinomial(BaseModel):
 class Binomial(BetaBinomial):
     @classmethod
     def get_default_config(cls) -> ModelConfig:
-        re_1 = RandomEffectConfig(
-            groups=["model"],
-            name="model_effects",
-            prior=PriorConfig(
-                distribution=dist.Normal,
-                distribution_args={"loc": 0.0, "scale": 0.3},
-            ),
-        )
-        re_2 = RandomEffectConfig(
-            groups=["task"],
-            name="task_effects",
-            prior=PriorConfig(
-                distribution=dist.Normal,
-                distribution_args={"loc": 0.0, "scale": 0.3},
-            ),
-        )
-
         params = [
             ParameterConfig(
                 name="overall_mean",
@@ -612,10 +584,20 @@ class Binomial(BetaBinomial):
             ),
         ]
 
+        # Binomial needs at least one random effect - otherwise just Bernoulli
+        re_1 = RandomEffectConfig(
+            groups=["task"],
+            name="task_effects",
+            prior=PriorConfig(
+                distribution=dist.Normal,
+                distribution_args={"loc": 0.0, "scale": 0.3},
+            ),
+        )
+
         return ModelConfig(
             configurable_parameters=params,
-            random_effects=[re_1, re_2],
-            main_effect_params=["overall_mean", "model_effects", "success_prob"],
+            random_effects=[re_1],
+            main_effect_params=["success_prob"],
         )
 
     # same prep data as BetaBinomial

@@ -6,12 +6,14 @@ from ..analysis_state import ModelAnalysisState
 from ..ui import ModellingDisplay
 
 
-def fit(model_analysis_state: ModelAnalysisState, display: ModellingDisplay) -> None:
+def fit(
+    model_analysis_state: ModelAnalysisState, display: ModellingDisplay | None = None
+) -> None:
     """
     Run an MCMC fit and store the result.
     """
-
-    display.update_header(f"Fitting {model_analysis_state.model_name}")
+    if display:
+        display.update_header(f"Fitting {model_analysis_state.model_name}")
 
     cfg = model_analysis_state.model_config.fit
     if cfg.method == "NUTS":
@@ -52,7 +54,8 @@ def fit(model_analysis_state: ModelAnalysisState, display: ModellingDisplay) -> 
         if display:
             display.update_stat("Status", "Completed")
     except KeyboardInterrupt:  # pragma: no cover
-        display.logger.info("MCMC interrupted by user")
+        if display:
+            display.logger.info("MCMC interrupted by user")
         raise
     except Exception as e:  # pragma: no cover
         if display:

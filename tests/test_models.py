@@ -2,13 +2,13 @@ from __future__ import annotations
 
 from typing import Dict, Tuple
 
-import jax
 import jax.numpy as jnp
 import numpyro.distributions as dist
 import pandas as pd
 import pytest
-from numpyro import handlers
 
+from hibayes.analysis_state import ModelAnalysisState
+from hibayes.model import fit
 from hibayes.model.models import (
     BaseModel,
     BetaBinomial,
@@ -19,36 +19,28 @@ from hibayes.model.models import (
 )
 
 
-@pytest.fixture
-def sample_df() -> pd.DataFrame:
-    """
-    A minimal dataframe that will exercise the default BetaBinomial/Binomial
-    """
-    return pd.DataFrame(
-        {
-            "model": ["m1", "m1", "m2", "m2"],
-            "task": ["t1", "t1", "t1", "t1"],
-            "score": [1, 0, 1, 0],
+def _fit_model(model: BaseModel, df: pd.DataFrame):
+    """run the model once (no inference) and return the numpyro trace."""
+    features, coords, dims = model.prepare_data(df)
+
+    state = ModelAnalysisState(
+        model_name=model.name(),
+        model_builder=model,
+        features=features,
+        coords=coords,
+        dims=dims,
+    )
+
+    # quick fitting for tests
+    state.model_config = state.model_builder.config.merge_in_dict(
+        config_dict={
+            "fit": {"samples": 1, "chains": 1, "warmup": 1, "progress_bar": False},
         }
     )
 
+    fit(state)
 
-@pytest.fixture
-def beta_binomial_model() -> BetaBinomial:
-    return BetaBinomial()
-
-
-@pytest.fixture
-def binomial_model() -> Binomial:
-    return Binomial()
-
-
-def _get_trace(model: BaseModel, df: pd.DataFrame):
-    """run the model once (no inference) and return the numpyro trace."""
-    features, *_ = model.prepare_data(df)
-    rng_key = jax.random.PRNGKey(0)
-    seeded_model = handlers.seed(model.build_model(), rng_key)
-    return handlers.trace(seeded_model).get_trace(**features)
+    return state
 
 
 def test_prepare_data_requires_obs():
@@ -90,21 +82,18 @@ def test_betabinomial_prepare_data_shapes(
     features, coords, dims = beta_binomial_model.prepare_data(sample_df)
 
     assert "obs" in features and "total_count" in features
-    assert features["obs"].shape == (2,)  # one row per distinct (model, task)
+    assert features["obs"].shape == (
+        2,
+    )  # one row per task, model not included in betabinomal defaults.
     assert all(features["total_count"] == jnp.array([2, 2], dtype=jnp.int32))
 
     # auto-generated indexing helpers
-    assert "model_effects_index" in features
-    assert "num_model_effects" in features
     assert "task_effects_index" in features
     assert "num_task_effects" in features
-    assert features["num_model_effects"] == 2
-    assert features["num_task_effects"] == 1
+    assert features["num_task_effects"] == 2
 
     # coords / dims
-    assert "model" in coords and len(coords["model"]) == 2
-    assert "task" in coords and len(coords["task"]) == 1
-    assert dims["model_effects"] == ["model"]
+    assert "task" in coords and len(coords["task"]) == 2
     assert dims["task_effects"] == ["task"]
 
 
@@ -119,21 +108,18 @@ def test_binomial_prepare_data_shapes(
     features, coords, dims = binomial_model.prepare_data(sample_df)
 
     assert "obs" in features and "total_count" in features
-    assert features["obs"].shape == (2,)  # one row per distinct (model, task)
+    assert features["obs"].shape == (
+        2,
+    )  # one row per task - not default to include model in binomial
     assert all(features["total_count"] == jnp.array([2, 2], dtype=jnp.int32))
 
     # auto-generated indexing helpers
-    assert "model_effects_index" in features
-    assert "num_model_effects" in features
     assert "task_effects_index" in features
     assert "num_task_effects" in features
-    assert features["num_model_effects"] == 2
-    assert features["num_task_effects"] == 1
+    assert features["num_task_effects"] == 2
 
     # coords / dims
-    assert "model" in coords and len(coords["model"]) == 2
-    assert "task" in coords and len(coords["task"]) == 1
-    assert dims["model_effects"] == ["model"]
+    assert "task" in coords and len(coords["task"]) == 2
     assert dims["task_effects"] == ["task"]
 
 
@@ -144,29 +130,28 @@ def test_betabinomial_model_trace_has_expected_nodes(
     A single forward pass should create the right sample/deterministic names
     without throwing.
     """
-    tr = _get_trace(beta_binomial_model, sample_df)
+    state = _fit_model(beta_binomial_model, sample_df)
+
+    inference_data = state.inference_data
 
     # Core parameters
-    assert "overall_mean" in tr
-    assert "model_effects" in tr
-    assert "task_effects" in tr
-    assert "dispersion_phi" in tr
+    assert "overall_mean" in inference_data.posterior
+    assert "task_effects" in inference_data.posterior
+    assert "dispersion_phi" in inference_data.posterior
 
     # Deterministics + likelihood
-    assert "p_bar" in tr
-    assert "success_prob" in tr
-    assert "n_correct" in tr
+    assert "p_bar" in inference_data.posterior
+    assert "success_prob" in inference_data.posterior
 
 
 def test_binomial_model_trace_has_expected_nodes(
     binomial_model: Binomial,
     sample_df: pd.DataFrame,
 ):
-    tr = _get_trace(binomial_model, sample_df)
+    state = _fit_model(binomial_model, sample_df)
+    posterior = state.inference_data.posterior
 
-    assert "overall_mean" in tr
-    assert "model_effects" in tr
-    assert "task_effects" in tr
-    assert "dispersion_phi" not in tr
-    assert "success_prob" in tr
-    assert "n_correct" in tr
+    assert "overall_mean" in posterior
+    assert "task_effects" in posterior
+    assert "dispersion_phi" not in posterior
+    assert "success_prob" in posterior
