@@ -20,9 +20,11 @@ from hibayes.utils import init_logger
 from ..analysis_state import ModelAnalysisState
 from .models import (
     BaseModel,
+    Bernoulli,
     BetaBinomial,
     Binomial,
     ModelConfig,
+    TwoLevelGroupBinomial,
 )
 
 logger = init_logger()
@@ -36,6 +38,8 @@ class ModelsToRunConfig:
     AVAILABLE_MODELS: ClassVar[Dict[str, Type[BaseModel]]] = {
         "BetaBinomial": BetaBinomial,
         "Binomial": Binomial,
+        "Bernoulli": Bernoulli,
+        "TwoLevelGroupBinomial": TwoLevelGroupBinomial,
     }
 
     # List of (model_class, model_config) tuples
@@ -200,7 +204,14 @@ class ModelsToRunConfig:
         """
         for model_builder_cls, model_config in self.enabled_models:
             logger.info(f"Instantiating model: {model_builder_cls.name}")
-            model_name = model_builder_cls.name()
+            if model_config is None:
+                model_name = model_builder_cls.name()
+            elif model_config.get("tag", None) is None:
+                model_name = model_builder_cls.name()
+            else:
+                model_name = (
+                    model_builder_cls.name() + "_" + model_config.get("tag", "")
+                )
             model_builder = model_builder_cls(
                 config=model_config,
             )

@@ -25,6 +25,8 @@ from numpyro.distributions.distribution import DistributionLike
 
 from hibayes.utils import init_logger
 
+from .utils import _link_to_key, cloglog_to_prob, logit_to_prob, probit_to_prob
+
 logger = init_logger()
 
 Features = Dict[str, float | int | jnp.ndarray | np.ndarray]
@@ -34,6 +36,15 @@ Coords = Dict[
 Dims = Dict[str, List[str]]
 Method = Literal["NUTS", "HMC"]  # MCMC sampler type
 ChainMethod = Literal["parallel", "sequential", "vectorised"]
+
+
+LINK_FUNCTION_MAP: Dict[str, Callable[[np.ndarray], np.ndarray]] = {
+    "identity": lambda x: x,
+    "logit": logit_to_prob,
+    "sigmoid": logit_to_prob,
+    "probit": probit_to_prob,
+    "cloglog": cloglog_to_prob,
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -173,8 +184,10 @@ class ModelConfig:
     main_effect_params: Optional[List[str]] = field(
         default_factory=list
     )  # a list of the main effect parameters in the model which you would like to plot. If None then default to parameter config
-
     tag: Optional[str] = None  # a tag for the model config - e.g. version 1
+    link_function: Union[
+        str, Callable[[jnp.ndarray], jnp.ndarray]
+    ] = "sigmoid"  # link function for the model, if str then use the mapping in LINK_FUNCTION_MAP
 
     def __post_init__(self):
         # Ensure no duplicate parameter names
@@ -195,10 +208,24 @@ class ModelConfig:
                     raise ValueError(
                         f"Parameter names reused by random_effects: {', '.join(overlap)}"
                     )
+        if isinstance(self.link_function, str):
+            if self.link_function not in LINK_FUNCTION_MAP:
+                raise ValueError(
+                    f"Invalid link function '{self.link_function}'. Valid options are: {list(LINK_FUNCTION_MAP.keys())}"
+                )
+            self.link_function = LINK_FUNCTION_MAP[self.link_function]
 
         self.main_effect_params = (
-            [p.name for p in self.configurable_parameters if p.main_effect]
-            + [re.name for re in self.random_effects if re.main_effect]
+            [
+                p.name
+                for p in self.configurable_parameters
+                if p.main_effect and p.name not in self.main_effect_params
+            ]
+            + [
+                re.name
+                for re in self.random_effects
+                if re.main_effect and re.name not in self.main_effect_params
+            ]
             + self.main_effect_params
         )
 
@@ -240,6 +267,16 @@ class ModelConfig:
                 return parameter
         return None
 
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        state["link_function"] = _link_to_key(state["link_function"], LINK_FUNCTION_MAP)
+        return state
+
+    def __setstate__(self, state):
+        lf = state["link_function"]
+        state["link_function"] = LINK_FUNCTION_MAP[lf] if isinstance(lf, str) else lf
+        object.__setattr__(self, "__dict__", state)
+
     @staticmethod
     def _apply_delete_flag(item: Dict[str, Any]) -> bool:
         """Return True if this dict carries _delete_: true."""
@@ -255,6 +292,7 @@ class ModelConfig:
         main_effect_params: override
         configurable_parameters: modify - to add or delete the user should create a new class
         random_effects: delete, modify and add
+        link_function: override
         """
         fit_updates = config_dict.get("fit", {})
         new_fit = self.fit.merged(**fit_updates)
@@ -267,6 +305,8 @@ class ModelConfig:
         new_params = self.configurable_parameters
 
         new_tag = config_dict.get("tag", self.tag)
+
+        new_link = config_dict.get("link_function", self.link_function)
 
         if "configurable_parameters" in config_dict:
             param_updates = config_dict["configurable_parameters"]
@@ -321,6 +361,7 @@ class ModelConfig:
             configurable_parameters=new_params,
             random_effects=new_res,
             tag=new_tag,
+            link_function=new_link,
         )
 
 
@@ -424,9 +465,10 @@ class BaseModel(ABC):
 
 
 class BetaBinomial(BaseModel):
-    """flexible BetaBinomial GLM with random effects
+    """flexible BetaBinomial GLM with independent random effects
 
-    The class is generic. The set of random effects is defined in the config. The default config models 2 random effects with no interaction.
+    The class is generic. The set of random effects is defined in the config.
+    The default config models 1 random effects with no interaction.
     """
 
     @classmethod
@@ -572,6 +614,8 @@ class BetaBinomial(BaseModel):
 
 
 class Binomial(BetaBinomial):
+    """Binomial GLM (optionally with independent random effects)."""
+
     @classmethod
     def get_default_config(cls) -> ModelConfig:
         params = [
@@ -625,5 +669,205 @@ class Binomial(BetaBinomial):
                 )
                 # we like to plot proportions
                 numpyro.deterministic("obs", count_pred / n_tot)
+
+        return model
+
+
+class Bernoulli(BaseModel):
+    """Bernoulli GLM (optionally with independent random effects)."""
+
+    @classmethod
+    def get_default_config(cls) -> ModelConfig:
+        params = [
+            ParameterConfig(
+                name="overall_mean",
+                prior=PriorConfig(
+                    distribution=dist.Normal,
+                    distribution_args={"loc": 0.0, "scale": 0.3},
+                ),
+                main_effect=True,
+            ),
+        ]
+
+        return ModelConfig(
+            configurable_parameters=params,
+            random_effects=[],
+            main_effect_params=["success_prob"],
+        )
+
+    def _prepare_data(self, data: pd.DataFrame) -> Tuple[Features, Coords, Dims]:
+        """Convert a df of binary trials into NumPyro ready tensors.
+        score 0/1 outcome for each trial
+        """
+
+        features: Features = {}
+        coords: Coords = {}
+        dims: Dims = {}
+
+        for re_cfg in self.config.random_effects:
+            key_name = "_x_".join(re_cfg.groups)
+            if len(re_cfg.groups) == 1:
+                codes, cats = pd.factorize(data[re_cfg.groups[0]], sort=True)
+                cats = cats.tolist()
+            else:
+                # interaction term
+                codes, cats = pd.factorize(
+                    tuple(zip(*(data[g] for g in re_cfg.groups))), sort=True
+                )
+                cats = ["_x_".join(cat) for cat in cats]
+
+            idx_name = f"{re_cfg.name}_index"
+            size_name = f"num_{re_cfg.name}"
+
+            features[idx_name] = jnp.asarray(codes, dtype=jnp.int32)
+            features[size_name] = len(cats)
+
+            coords[key_name] = cats
+            dims[re_cfg.name] = [key_name]
+
+        features["obs"] = jnp.asarray(data["score"].values, dtype=jnp.int32)
+
+        return features, coords, dims
+
+    def linear_component(self, **features) -> jnp.ndarray:
+        """Intercept + (optional) random-effects intercepts."""
+        linear = self.sample_param("overall_mean")
+
+        for re_cfg in self.config.random_effects:
+            size = features[f"num_{re_cfg.name}"]
+            index = features[f"{re_cfg.name}_index"]
+
+            re_int = self.sample_plate(
+                plate_name=f"{re_cfg.name}_plate",
+                size=size,
+                param_name=re_cfg.name,
+                index=index,
+            )
+            linear = linear + re_int
+
+        return linear
+
+    def build_model(self):
+        def model(**features):
+            # fixed + random effects
+            linear = self.linear_component(**features)
+
+            # success probability on (0,1)
+            success_prob = numpyro.deterministic("success_prob", jax.nn.sigmoid(linear))
+
+            # likelihood
+            if features["obs"] is not None:
+                numpyro.sample(
+                    "obs", dist.Bernoulli(probs=success_prob), obs=features["obs"]
+                )
+            else:  # prior / posterior predictive
+                numpyro.sample("obs", dist.Bernoulli(probs=success_prob))
+
+        return model
+
+
+class TwoLevelGroupBinomial(BaseModel):
+    """
+    Hierarchical Binomial model, aggregated at group level, with
+    non-centred parameterisation for the global mean and the group-specific effects.
+    """
+
+    @classmethod
+    def get_default_config(cls) -> ModelConfig:
+        params = [
+            ParameterConfig(
+                name="mu_overall",
+                prior=PriorConfig(
+                    distribution=dist.Normal,
+                    distribution_args={"loc": 0.0, "scale": 1.0},
+                ),
+            ),
+            ParameterConfig(
+                name="sigma_overall",
+                prior=PriorConfig(
+                    distribution=dist.HalfNormal,
+                    distribution_args={"scale": 0.5},
+                ),
+            ),
+            ParameterConfig(
+                name="z_overall",
+                prior=PriorConfig(
+                    distribution=dist.Normal,
+                    distribution_args={"loc": 0.0, "scale": 1.0},
+                ),
+            ),
+            ParameterConfig(
+                name="sigma_domain",
+                prior=PriorConfig(
+                    distribution=dist.HalfNormal,
+                    distribution_args={"scale": 0.1},
+                ),
+            ),
+        ]
+
+        return ModelConfig(
+            configurable_parameters=params,
+            random_effects=[],  # TODO: set up is still not flexible enough for this multilevel model....
+            main_effect_params=[
+                "overall_mean",
+                "group_effects",
+            ],
+        )
+
+    def _prepare_data(self, data: pd.DataFrame) -> Tuple[Features, Coords, Dims]:
+        agg = (
+            data.groupby(["group"], observed=True)
+            .agg(
+                n_correct=("score", "sum"),
+                n_total=("score", "count"),
+            )
+            .reset_index()
+        )
+
+        group_codes, group_levels = pd.factorize(agg["group"], sort=True)
+
+        features: Features = {
+            "group_index": jnp.asarray(group_codes, dtype=jnp.int32),
+            "num_group": int(len(group_levels)),
+            "total_count": jnp.asarray(agg["n_total"].values, dtype=jnp.int32),
+            "obs": jnp.asarray(agg["n_correct"].values, dtype=jnp.int32),
+        }
+
+        coords: Coords = {"group": group_levels.tolist()}
+        dims: Dims = {"group_effects": ["group"]}
+
+        return features, coords, dims
+
+    def build_model(self):
+        def model(**features):
+            mu_overall = self.sample_param("mu_overall")
+            sigma_overall = self.sample_param("sigma_overall")
+            z_overall = self.sample_param("z_overall")
+
+            overall_mean = mu_overall + sigma_overall * z_overall
+            numpyro.deterministic("overall_mean", overall_mean)
+
+            mu_group = numpyro.sample("mu_group", dist.Normal(overall_mean, 0.5))
+            sigma_group = self.sample_param("sigma_domain")
+
+            z_group = numpyro.sample(
+                "z_group",
+                dist.Normal(0.0, 1).expand([features["num_group"]]),
+            )
+
+            group_effects = mu_group + sigma_group * z_group
+            numpyro.deterministic("group_effects", group_effects)
+
+            # likelihood
+            logit_p = group_effects[features["group_index"]]
+
+            numpyro.sample(
+                "obs",
+                dist.Binomial(
+                    total_count=features["total_count"],
+                    probs=jax.nn.sigmoid(logit_p),
+                ),
+                obs=features["obs"],
+            )
 
         return model

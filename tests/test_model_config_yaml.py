@@ -75,8 +75,8 @@ def test_two_models_of_same_class(
     cfg = ModelsToRunConfig.from_yaml(str(cfg_dir / "two_models_same_class.yaml"))
     states = list(cfg.build_models(sample_df))
     assert len(states) == 2
-    assert states[0].model_name == "Binomial"
-    assert states[1].model_name == "Binomial"
+    assert states[0].model_name == "Binomial_version_1"
+    assert states[1].model_name == "Binomial_version_2"
     assert states[0].model_config.tag == "version_1"
     assert states[1].model_config.tag == "version_2"
 

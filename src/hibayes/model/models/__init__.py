@@ -1,5 +1,6 @@
 from .models import (
     BaseModel,
+    Bernoulli,
     BetaBinomial,
     Binomial,
     ChainMethod,
@@ -12,6 +13,7 @@ from .models import (
     ParameterConfig,
     PriorConfig,
     RandomEffectConfig,
+    TwoLevelGroupBinomial,
 )
 
 __all__ = [
@@ -29,4 +31,6 @@ __all__ = [
     "RandomEffectConfig",
     "BetaBinomial",
     "Binomial",
+    "Bernoulli",
+    "TwoLevelGroupBinomial",
 ]

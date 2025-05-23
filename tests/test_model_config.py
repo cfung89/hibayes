@@ -307,3 +307,15 @@ def test_prepare_data_multiple_random_effects(
     assert features["num_model_effects"] == 2
     assert features["num_task_effects"] == 2
     assert features["num_model_task_int"] == 4
+
+
+def test_main_effects_params(bb_multi_re_model_2: BetaBinomial):
+    """
+    Verify that the main_effect_params are correctly set up in the model.
+    """
+
+    # check that the model has the correct main effects
+    assert bb_multi_re_model_2.config.get_plot_params() == [
+        "overall_mean",
+        "difficulty_effects",
+    ]

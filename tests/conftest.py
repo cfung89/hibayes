@@ -108,7 +108,7 @@ def bb_multi_re_model_2() -> BetaBinomial:
     cfg = ModelConfig(
         configurable_parameters=base_cfg.configurable_parameters,
         random_effects=[re_model_effect, re_task, re_difficulty, re_inter],
-        main_effect_params=base_cfg.main_effect_params,
+        main_effect_params=["overall_mean", "difficulty_effects"],
         fit=base_cfg.fit,
     )
 

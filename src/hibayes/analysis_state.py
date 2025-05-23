@@ -177,6 +177,11 @@ class ModelAnalysisState:
         """Set the fitted status."""
         self._is_fitted = is_fitted
 
+    @property
+    def link_function(self) -> Optional[Callable]:
+        """Get the link function."""
+        return self.model_config.link_function
+
     def save(self, path: Path) -> None:
         """
         save the model state
@@ -317,16 +322,17 @@ class AnalysisState:
         """Get a specific communicate item."""
         return self._communicate[item_name]
 
-    @communicate.setter
-    def communicate(self, communicate: Dict[str, plt.Figure | pd.DataFrame]) -> None:
-        """Set the communicate."""
-        self._communicate = communicate
-
     def add_plot(self, plot: plt.Figure, plot_name: str) -> None:
         """Add a plot to the communicate."""
         if self._communicate is None:
             self._communicate = {}
         self._communicate[plot_name] = plot
+
+    def add_table(self, table: pd.DataFrame, table_name: str) -> None:
+        """Add a table to the communicate."""
+        if self._communicate is None:
+            self._communicate = {}
+        self._communicate[table_name] = table
 
     @property
     def models(self) -> List[ModelAnalysisState]:
@@ -409,10 +415,8 @@ class AnalysisState:
                     obj.savefig(comm_path / f"{name}.png", dpi=300, bbox_inches="tight")
                     plt.close(obj)  # free memory in long pipelines
                 elif isinstance(obj, pd.DataFrame):
-                    obj.to_parquet(
-                        comm_path / f"{name}.parquet",
-                        engine="pyarrow",  # auto might result in different engines in different setups)
-                        compression="snappy",
+                    obj.to_csv(
+                        comm_path / f"{name}.csv",
                     )
                 else:
                     raise TypeError(
@@ -445,8 +449,8 @@ class AnalysisState:
                     ax.imshow(img)
                     ax.axis("off")
                     communicate[stem] = fig
-                elif suffix == ".parquet":
-                    communicate[stem] = pd.read_parquet(p)
+                elif suffix == ".csv":
+                    communicate[stem] = pd.read_csv(p)
                 else:
                     logger.warning(
                         f"Unsupported file type in communicate directory: {p}. Supported types are .png and .parquet."
