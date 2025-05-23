@@ -41,6 +41,7 @@ def forest_plot(
                     model_analysis.inference_data,
                     var_names=vars,
                     figsize=figsize,
+                    transform=model_analysis.link_function,
                     *args,
                     **kwargs,
                 )
@@ -88,6 +89,7 @@ def trace_plot(
                     model_analysis.inference_data,
                     var_names=vars,
                     figsize=figsize,
+                    transform=model_analysis.link_function,
                     *args,
                     **kwargs,
                 )
@@ -150,8 +152,6 @@ def pair_plot(
 
 @communicate
 def model_comparison_plot(
-    method: str = None,
-    figsize: tuple[int, int] = (10, 5),
     *args,
     **kwargs,
 ):
@@ -181,21 +181,15 @@ def model_comparison_plot(
 
         comparisons = az.compare(
             data_dict,
-            method=method,
             *args,
             **kwargs,
         )
 
-        az.plot_compare(comparisons, figsize=figsize, *args, **kwargs)
+        az.plot_compare(comparisons, *args, **kwargs)
         fig = plt.gcf()
         state.add_plot(
             plot=fig,
             plot_name="model_comparison",
-        )
-        plt.savefig(
-            "model_comparison.png",
-            dpi=300,
-            bbox_inches="tight",
         )
         return state, "pass"
 
