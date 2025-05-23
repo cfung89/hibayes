@@ -6,6 +6,7 @@ from .plots import (
     pair_plot,
     trace_plot,
 )
+from .tables import summary_table
 
 __all__ = [
     "Communicator",
@@ -16,4 +17,5 @@ __all__ = [
     "model_comparison_plot",
     "pair_plot",
     "trace_plot",
+    "summary_table",
 ]
