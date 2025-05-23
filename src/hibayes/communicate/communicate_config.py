@@ -19,6 +19,7 @@ class CommunicateConfig:
         "forest_plot",
         "pair_plot",
         "model_comparison_plot",
+        "summary_table",
     ]
 
     enabled_communicators: List[Communicator] = field(
