@@ -23,10 +23,11 @@ data_inspector:
     missing: 0.1
 model:
   models:
-    ModelSampleEffects:
-      mapping_name:
-        score: success
-        task: sample
+    name: ModelSampleEffects
+    config:
+      column_map:
+          score: success
+          task: sample
       fit:
         chains: 4
         samples: 1000

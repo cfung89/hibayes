@@ -1,0 +1,38 @@
+data_loader:
+  paths:
+    files_to_process:
+      - data/gpt-4o
+
+  extractors:
+    enabled:
+      - base
+    custom:
+      path: files/custom_extractor.py
+      classes:
+        - Domains
+model:
+  models:
+    - name: TwoLevelGroupBinomial
+      config:
+        tag: version_1
+        centred: false
+        column_map:
+          domain: group
+
+platform:
+checkers:
+  checks:
+    - prior_predictive_plot
+    - r_hat
+    - divergences
+    - ess_bulk
+    - ess_tail
+    - loo
+    - bfmi
+    - posterior_predictive_plot: {plot_proportion: true, plot_kwargs: {num_pp_samples: 50}}
+    - waic
+communicators:
+  communicate:
+    - forest_plot: {combined: true}
+    - trace_plot
+    - summary_table

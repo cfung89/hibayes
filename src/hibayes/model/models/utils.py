@@ -1,10 +1,24 @@
 import copy
 from collections.abc import Sequence
-from typing import Type, TypeVar
+from typing import Callable, Type, TypeVar
 
-import jax.numpy as jnp
+import numpy as np
+from scipy.stats import norm
 
 T = TypeVar("T")
+
+
+def logit_to_prob(x):
+    return 1 / (1 + np.exp(-x))
+
+
+def probit_to_prob(x):
+    return norm.cdf(x)
+
+
+def cloglog_to_prob(x):
+    """log‑log link."""
+    return 1.0 - np.exp(-np.exp(x))
 
 
 def merge_sequence(
@@ -16,6 +30,11 @@ def merge_sequence(
     return copy.deepcopy(update_seq)
 
 
-def logit_to_prob(x):
-    """Convert logit values to probabilities."""
-    return 1.0 / (1.0 + jnp.exp(-x))
+def _link_to_key(fn: Callable | str, mapping: dict[str, Callable]) -> str:
+    """Return the key in LINK_FUNCTION_MAP that maps to `fn`."""
+    if isinstance(fn, str):
+        return fn
+    for k, v in mapping.items():
+        if v is fn:
+            return k
+    raise ValueError(f"Unknown link function {fn!r}")

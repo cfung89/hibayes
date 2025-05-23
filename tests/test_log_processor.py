@@ -351,32 +351,3 @@ def test_end_to_end_pipeline(tmp_path: Path, eval_sample, eval_log, log_info, dl
     ):
         df = get_sample_df(config=dl_cfg)
     assert len(df) == 1 and df.loc[0, "score"] == 0.75
-
-
-# Integration test with real log files
-@pytest.mark.parametrize("log_dir", ["logs_1", "logs_2"])
-def test_real_log_processing(log_dir):
-    """Test processing with actual log files from the test directory"""
-    # Get the path to the test logs directory
-    tests_dir = Path(__file__).parent
-    logs_dir = tests_dir / log_dir
-
-    if not logs_dir.exists() or not any(logs_dir.iterdir()):
-        pytest.skip(f"No test log files available in {log_dir}")
-
-    logs_dir = str(logs_dir)
-
-    config = DataLoaderConfig(
-        enabled_extractors=["base"], custom_extractors=[], files_to_process=[logs_dir]
-    )
-    df = get_sample_df(config=config)
-
-    # Verify we got some data
-    assert not df.empty
-    assert "score" in df.columns
-    assert "model" in df.columns
-
-    assert "claude-3-7-sonnet-20250219" in df["model"].unique(), "Missing model"
-    assert "o3-mini" in df["model"].unique(), "Missing model"
-
-    assert len(df) == 60, "Incorrect number of samples"

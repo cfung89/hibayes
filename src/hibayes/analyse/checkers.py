@@ -4,7 +4,6 @@ import arviz as az
 import jax
 import matplotlib.pyplot as plt
 import numpy as np
-import xarray as xr
 from numpyro.infer import Predictive
 
 from ..analysis_state import ModelAnalysisState
@@ -311,15 +310,30 @@ def posterior_predictive_plot(
             state.inference_data.extend(pp_ds)
 
         if plot_proportion:
-            proportion = state.features["obs"]
-            state.inference_data.assign(
-                obs=xr.DataArray(
-                    proportion,
-                    name="obs",
-                ),
-                groups="observed_data",
-                inplace=True,
-            )
+            if "total_count" not in state.features:
+                raise ValueError(
+                    "Cannot plot proportion without 'total_count' in features."
+                )
+            # Observed proportion
+            obs_prop = state.features["obs"] / state.features["total_count"]
+
+            # Predicted proportion
+            pp_obs = state.inference_data.posterior_predictive["obs"]
+            pp_prop = pp_obs / state.features["total_count"]
+
+            # Attach to InferenceData
+            if "observed_data" in state.inference_data.groups():
+                state.inference_data.observed_data["prop_pred"] = (
+                    ("obs_dim_0",),
+                    obs_prop,
+                )
+            else:
+                state.inference_data.add_groups(
+                    observed_data={"prop_pred": (("obs_dim_0",), obs_prop)},
+                    inplace=True,
+                )
+
+            state.inference_data.posterior_predictive["prop_pred"] = pp_prop
 
         fig, ax = plt.subplots(figsize=figsize)
         if kind == "kde":
@@ -327,7 +341,7 @@ def posterior_predictive_plot(
             az.plot_ppc(
                 state.inference_data,
                 ax=ax,
-                var_names=["obs"] if plot_proportion else None,
+                var_names=["prop_pred"] if plot_proportion else None,
                 **plot_kwargs,
             )
             if display:

@@ -217,15 +217,6 @@ class ModellingDisplay:
                 samples_per_sec = self.stats["Samples processed"] / elapsed
                 self.stats["Processing speed"] = f"{samples_per_sec:.1f} samples/sec"
 
-        # Format models detected
-        if (
-            isinstance(self.stats["Statistical Models"], set)
-            and self.stats["Statistical Models"]
-        ):
-            self.stats["Statistical Models"] = ", ".join(
-                sorted(self.stats["Statistical Models"])
-            )
-
         # Rebuild the table
         self.stats_table = Table(box=box.SIMPLE)
         self.stats_table.add_column("Statistic", style="cyan")
