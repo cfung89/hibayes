@@ -56,12 +56,23 @@ class CommunicateConfig:
 
         communicate_config = config.get("communicate", None)
         if isinstance(communicate_config, list):
-            enabled_communicators.extend(
-                [
-                    registry_get(RegistryInfo(type="communicate", name=check))()
-                    for check in communicate_config
-                ]
-            )
+            for communicate in communicate_config:
+                if isinstance(communicate, dict):
+                    communicate_name, communicate_config = next(
+                        iter(communicate.items())
+                    )
+                    enabled_communicators.append(
+                        registry_get(
+                            RegistryInfo(type="communicate", name=communicate_name)
+                        )(**communicate_config)
+                    )
+                else:
+                    communicate_name = communicate
+                    enabled_communicators.append(
+                        registry_get(
+                            RegistryInfo(type="communicate", name=communicate_name)
+                        )()
+                    )
         elif isinstance(communicate_config, dict):
             for communicate_name, kwargs in communicate_config.items():
                 communicator = registry_get(
