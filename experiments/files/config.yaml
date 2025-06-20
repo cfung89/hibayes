@@ -1,0 +1,51 @@
+data_loader:
+  paths:
+    files_to_process:
+      - data
+
+  extractors:
+    enabled:
+      - base
+    custom:
+      path: files/extractor.py
+      classes:
+        - Domains
+model:
+  models:
+    - name: BetaBinomial
+      config:
+        column_map:
+          Success Count: n_correct
+          Total Attempts: n_total
+          Sample ID: task
+    # - name: Binomial
+    #   config:
+    #     column_map:
+    #       Success Count: n_correct
+    #       Total Attempts: n_total
+    #       Sample ID: task
+    # - name: TwoLevelGroupBinomial
+    #   config:
+    #     tag: version_1
+    #     centred: false
+    #     column_map:
+    #       domain: group
+platform:
+checkers:
+  checks:
+    - prior_predictive_plot
+    - r_hat
+    - divergences
+    - ess_bulk
+    - ess_tail
+    - loo
+    - bfmi
+    - posterior_predictive_plot: {plot_proportion: true, plot_kwargs: {num_pp_samples: 50}}
+    - waic
+communicators:
+  communicate:
+    - forest_plot: {combined: true}
+    # - trace_plot
+    - pair_plot
+    - model_comparison_plot
+    - summary_table

@@ -1,0 +1,106 @@
+schema: '2.0'
+stages:
+  load:
+    cmd: hibayes-load --config files/config.yaml --out .output/load/
+    deps:
+    - path: ../src/hibayes/
+      hash: md5
+      md5: 2b74aee60d6c9c91846c068eaad331ce.dir
+      size: 411378
+      nfiles: 87
+    - path: files/extractor.py
+      hash: md5
+      md5: efad238b9f44e34a8f4819a37d8b2337
+      size: 745
+    params:
+      files/config.yaml:
+        data_loader:
+          paths:
+            files_to_process:
+            - data
+          extractors:
+            enabled:
+            - base
+            custom:
+              path: files/extractor.py
+              classes:
+              - Domains
+    outs:
+    - path: .output/load/
+      hash: md5
+      md5: 89b87aa95a7be6e552d2eed1d1fd71b8.dir
+      size: 132056
+      nfiles: 1
+  model:
+    cmd: hibayes-model --config files/config.yaml --data .output/load/data.parquet
+      --out .output/model/
+    deps:
+    - path: ../src/hibayes/
+      hash: md5
+      md5: 2b74aee60d6c9c91846c068eaad331ce.dir
+      size: 411378
+      nfiles: 87
+    - path: .output/load/data.parquet
+      hash: md5
+      md5: 6a2ab06d867b392dd9ce2166b1d10472
+      size: 132056
+    params:
+      files/config.yaml:
+        checkers:
+          checks:
+          - prior_predictive_plot
+          - r_hat
+          - divergences
+          - ess_bulk
+          - ess_tail
+          - loo
+          - bfmi
+          - posterior_predictive_plot:
+              plot_proportion: true
+              plot_kwargs:
+                num_pp_samples: 50
+          - waic
+        model:
+          models:
+          - name: BetaBinomial
+            config:
+              column_map:
+                Success Count: n_correct
+                Total Attempts: n_total
+                Sample ID: task
+        platform:
+    outs:
+    - path: .output/model/
+      hash: md5
+      md5: 062de41b55c4263864733fda890b85d3.dir
+      size: 1071581536
+      nfiles: 12
+  communicate:
+    cmd: hibayes-comm --config files/config.yaml --analysis_state .output/model/ --out
+      .output/communicate/
+    deps:
+    - path: ../src/hibayes/
+      hash: md5
+      md5: 2b74aee60d6c9c91846c068eaad331ce.dir
+      size: 411378
+      nfiles: 87
+    - path: .output/model/
+      hash: md5
+      md5: 062de41b55c4263864733fda890b85d3.dir
+      size: 1071581536
+      nfiles: 12
+    params:
+      files/config.yaml:
+        communicators:
+          communicate:
+          - forest_plot:
+              combined: true
+          - pair_plot
+          - model_comparison_plot
+          - summary_table
+    outs:
+    - path: .output/communicate/
+      hash: md5
+      md5: 9eb12908bb3b239f80ed92bf747893bd.dir
+      size: 1072377328
+      nfiles: 12
